@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maze Game V6</title>
+
+<style>
+body {
+  margin: 0;
+  background: #111;
+  color: white;
+  font-family: sans-serif;
+  overflow: hidden;
+}
+
+#ui {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+}
+
+select, button {
+  font-size: 14px;
+  margin-right: 5px;
+  margin-top: 3px;
+}
+
+#stats {
+  margin-top: 5px;
+  font-size: 14px;
+}
+
+canvas {
+  display: block;
+  margin-top: 105px; /* UPDATED */
+}
+
+#controls {
+  position: absolute;
+  bottom: 15px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 5px;
+}
+
+.btn {
+  width: 60px;
+  height: 60px;
+  font-size: 20px;
+  border-radius: 10px;
+  border: none;
+  background: #333;
+  color: white;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+  Pack:
+  <select id="packSelect"></select><br>
+
+  Level:
+  <select id="levelSelect"></select>
+  <button onclick="regenerate()">New Pack</button>
+  <button onclick="toggleFullscreen()">Fullscreen</button>
+
+  <div id="stats">
+    ⏱ <span id="time">0</span>s |
+    👣 <span id="moves">0</span><br>
+    🏆 Best: <span id="best">-</span>
+  </div>
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="controls">
+  <div class="row">
+    <button class="btn" onclick="move(0,-1)">↑</button>
+  </div>
+  <div class="row">
+    <button class="btn" onclick="move(-1,0)">←</button>
+    <button class="btn" onclick="move(0,1)">↓</button>
+    <button class="btn" onclick="move(1,0)">→</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let packs = [];
+let currentPackIndex = 0;
+let levels = [];
+let currentLevel = 0;
+
+let player = {x:0,y:0};
+let moves = 0;
+let startTime = 0;
+let timerInterval;
+let timerStarted = false; // ✅ NEW
+
+let discovered = new Set();
+
+/* ---------- SEEDED RNG ---------- */
+function createRNG(seed) {
+  let s = seed;
+  return function() {
+    s = Math.sin(s) * 10000;
+    return s - Math.floor(s);
+  };
+}
+
+/* ---------- RESIZE ---------- */
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight - 105; // UPDATED
+}
+window.onresize = resize;
+resize();
+
+/* ---------- STORAGE ---------- */
+function saveAll() {
+  localStorage.setItem("maze_packs_v5", JSON.stringify(packs));
+}
+
+function loadAll() {
+  const data = localStorage.getItem("maze_packs_v5");
+
+  if (data) {
+    packs = JSON.parse(data);
+  } else {
+    const rng = createRNG(12345);
+
+    packs = [{
+      name: "Campaign",
+      levels: generateLevels(rng),
+      best: {}
+    }];
+
+    saveAll();
+  }
+}
+
+/* ---------- PACKS ---------- */
+function randomName(){
+  const a=["happy","dark","blue","silent","fast","weird","brave"];
+  const b=["flying","hidden","burning","lost","shiny","cold"];
+  const c=["squirrel","tiger","planet","robot","maze","shadow"];
+  return `${pick(a)} ${pick(b)} ${pick(c)}`;
+}
+function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+function createNewPack(){
+  if (packs.length >= 5){
+    const names = packs.map((p,i)=>`${i}: ${p.name}`).join("\n");
+    const del = prompt("Delete a pack:\n"+names+"\n(0 is Campaign and cannot be deleted)");
+
+    if (del === null) return;
+    const idx = parseInt(del);
+
+    if (idx === 0) {
+      alert("Cannot delete Campaign pack");
+      return;
+    }
+
+    packs.splice(idx,1);
+  }
+
+  const newPack = {
+    name: randomName(),
+    levels: generateLevels(),
+    best: {}
+  };
+
+  packs.push(newPack);
+  currentPackIndex = packs.length - 1;
+
+  saveAll();
+  setupPackUI();
+  loadPack(currentPackIndex);
+}
+
+function regenerate(){
+  createNewPack();
+}
+
+/* ---------- LEVEL GENERATION ---------- */
+function generateLevels(rng = Math.random) {
+  const arr = [];
+  for (let i=0;i<20;i++){
+    const size = 8 + i*2;
+    arr.push(generateMaze(size,size,rng));
+  }
+  return arr;
+}
+
+function generateMaze(w,h,rng){
+  const grid = Array.from({length:h},()=>Array.from({length:w},()=>({
+    visited:false,walls:[1,1,1,1]
+  })));
+
+  function shuffle(a){ return a.sort(()=>rng()-0.5); }
+
+  function carve(x,y){
+    grid[y][x].visited=true;
+    for (let [dx,dy,wall,opp] of shuffle([
+      [0,-1,0,2],[1,0,1,3],[0,1,2,0],[-1,0,3,1]
+    ])){
+      const nx=x+dx, ny=y+dy;
+      if(nx>=0&&ny>=0&&nx<w&&ny<h&&!grid[ny][nx].visited){
+        grid[y][x].walls[wall]=0;
+        grid[ny][nx].walls[opp]=0;
+        carve(nx,ny);
+      }
+    }
+  }
+  carve(0,0);
+
+  function farthest(){
+    const dist=Array.from({length:h},()=>Array(w).fill(-1));
+    const q=[[0,0]];
+    dist[0][0]=0;
+
+    while(q.length){
+      const [x,y]=q.shift();
+      const cell=grid[y][x];
+      for (let [dx,dy,wid] of [[0,-1,0],[1,0,1],[0,1,2],[-1,0,3]]){
+        if(cell.walls[wid]===0){
+          const nx=x+dx,ny=y+dy;
+          if(dist[ny][nx]===-1){
+            dist[ny][nx]=dist[y][x]+1;
+            q.push([nx,ny]);
+          }
+        }
+      }
+    }
+
+    let max=0;
+    dist.forEach(r=>r.forEach(d=>{if(d>max)max=d;}));
+
+    const far=[];
+    for(let y=0;y<h;y++)
+      for(let x=0;x<w;x++)
+        if(dist[y][x]>max*0.7) far.push({x,y});
+
+    return far[Math.floor(rng()*far.length)];
+  }
+
+  return {w,h,grid,start:{x:0,y:0},end:farthest()};
+}
+
+/* ---------- GAME ---------- */
+function loadPack(i){
+  currentPackIndex=i;
+  levels=packs[i].levels;
+  setupLevelsUI();
+  autoSelectLevel();
+  setupPackUI();
+}
+
+function autoSelectLevel(){
+  const best = packs[currentPackIndex].best;
+  for (let i=0;i<levels.length;i++){
+    if (!best[i]){
+      loadLevel(i);
+      levelSelect.value=i;
+      return;
+    }
+  }
+  loadLevel(0);
+}
+
+function loadLevel(i){
+  currentLevel=i;
+  player={...levels[i].start};
+  moves=0;
+
+  startTime = 0;          // ✅ UPDATED
+  timerStarted = false;   // ✅ UPDATED
+
+  discovered=new Set();
+  reveal(player.x,player.y);
+
+  clearInterval(timerInterval);
+  timerInterval=setInterval(updateStats,200);
+
+  updateStats();
+}
+
+function getBest(){
+  return packs[currentPackIndex].best[currentLevel];
+}
+
+function setBest(data){
+  const prev=getBest();
+  if(!prev || data.time<prev.time){
+    packs[currentPackIndex].best[currentLevel]=data;
+    saveAll();
+  }
+}
+
+function updateStats(){
+  document.getElementById("moves").textContent=moves;
+
+  const t = timerStarted
+    ? Math.floor((Date.now()-startTime)/1000)
+    : 0;
+
+  document.getElementById("time").textContent=t;
+
+  const best=getBest();
+  document.getElementById("best").textContent =
+    best ? `${best.time}s / ${best.moves}` : "-";
+}
+
+function reveal(x,y){
+  const key=(x,y)=>`${x},${y}`;
+  discovered.add(key(x,y));
+  [[0,-1],[1,0],[0,1],[-1,0]].forEach(([dx,dy])=>{
+    const nx=x+dx,ny=y+dy;
+    const l=levels[currentLevel];
+    if(nx>=0&&ny>=0&&nx<l.w&&ny<l.h){
+      discovered.add(key(nx,ny));
+    }
+  });
+}
+
+function draw(){
+  const l=levels[currentLevel];
+  const size=Math.min(canvas.width/l.w,canvas.height/l.h);
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const key=(x,y)=>`${x},${y}`;
+
+  for(let y=0;y<l.h;y++){
+    for(let x=0;x<l.w;x++){
+      if(!discovered.has(key(x,y))){
+        ctx.fillStyle="black";
+        ctx.fillRect(x*size,y*size,size,size);
+        continue;
+      }
+      const c=l.grid[y][x];
+      const px=x*size,py=y*size;
+      ctx.strokeStyle="white";
+      if(c.walls[0]) line(px,py,px+size,py);
+      if(c.walls[1]) line(px+size,py,px+size,py+size);
+      if(c.walls[2]) line(px,py+size,px+size,py+size);
+      if(c.walls[3]) line(px,py,px,py+size);
+    }
+  }
+
+  if(discovered.has(key(l.start.x,l.start.y))){
+    ctx.fillStyle="green";
+    ctx.fillRect(l.start.x*size+4,l.start.y*size+4,size-8,size-8);
+  }
+
+  if(discovered.has(key(l.end.x,l.end.y))){
+    ctx.fillStyle="red";
+    ctx.fillRect(l.end.x*size+4,l.end.y*size+4,size-8,size-8);
+  }
+
+  ctx.fillStyle="yellow";
+  ctx.beginPath();
+  ctx.arc(player.x*size+size/2,player.y*size+size/2,size/4,0,Math.PI*2);
+  ctx.fill();
+
+  requestAnimationFrame(draw);
+}
+
+function line(x1,y1,x2,y2){
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+}
+
+function move(dx,dy){
+  const l=levels[currentLevel];
+  const c=l.grid[player.y][player.x];
+  const map={"0,-1":0,"1,0":1,"0,1":2,"-1,0":3};
+
+  if(c.walls[map[dx+","+dy]]===0){
+
+    if (!timerStarted) {           // ✅ START TIMER ON FIRST MOVE
+      startTime = Date.now();
+      timerStarted = true;
+    }
+
+    player.x+=dx;
+    player.y+=dy;
+    moves++;
+    reveal(player.x,player.y);
+
+    if(player.x===l.end.x && player.y===l.end.y){
+      const t = timerStarted
+        ? Math.floor((Date.now()-startTime)/1000)
+        : 0;
+
+      setBest({time:t,moves});
+
+      setTimeout(()=>{
+        if(currentLevel<levels.length-1){
+          loadLevel(currentLevel+1);
+          levelSelect.value=currentLevel;
+        }
+      },100);
+    }
+  }
+}
+
+/* ---------- UI ---------- */
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowUp") move(0,-1);
+  if(e.key==="ArrowDown") move(0,1);
+  if(e.key==="ArrowLeft") move(-1,0);
+  if(e.key==="ArrowRight") move(1,0);
+});
+
+function toggleFullscreen(){
+  if(!document.fullscreenElement){
+    document.documentElement.requestFullscreen();
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+const levelSelect=document.getElementById("levelSelect");
+const packSelect=document.getElementById("packSelect");
+
+function setupLevelsUI(){
+  levelSelect.innerHTML="";
+  for(let i=0;i<levels.length;i++){
+    const o=document.createElement("option");
+    o.value=i; o.textContent=i+1;
+    levelSelect.appendChild(o);
+  }
+  levelSelect.onchange=()=>loadLevel(+levelSelect.value);
+}
+
+function setupPackUI(){
+  packSelect.innerHTML="";
+  packs.forEach((p,i)=>{
+    const o=document.createElement("option");
+    o.value=i; o.textContent=p.name;
+    packSelect.appendChild(o);
+  });
+  packSelect.value=currentPackIndex;
+  packSelect.onchange=()=>loadPack(+packSelect.value);
+}
+
+/* ---------- INIT ---------- */
+loadAll();
+setupPackUI();
+loadPack(currentPackIndex);
+draw();
+
+</script>
+
+</body>
+</html>
