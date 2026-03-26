@@ -7,35 +7,20 @@
 <style>
   html,body{margin:0;padding:0;background:#000;overflow:hidden;touch-action:none;font-family:monospace;color:#fff;}
   canvas{display:block;}
-  #ui{
-    position:fixed;inset:0;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:14px;
-    background:rgba(0,0,0,0.96);overflow-y:auto;padding:20px;box-sizing:border-box;
-  }
+  #ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,0.96);overflow-y:auto;padding:20px;box-sizing:border-box;}
   h1{margin:0;font-size:clamp(20px,5vw,32px);letter-spacing:4px;}
-  .hint{margin:0;font-size:13px;opacity:0.65;text-align:center;max-width:320px;}
+  .hint{margin:0;font-size:13px;opacity:0.65;text-align:center;max-width:300px;line-height:1.5;}
   button{background:#fff;color:#000;border:none;padding:12px 28px;font-family:monospace;font-size:15px;cursor:pointer;letter-spacing:2px;}
   button:active{background:#aaa;}
   button.sec{background:#333;color:#fff;font-size:13px;padding:10px 20px;}
-  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
   .status{font-size:12px;opacity:0.75;text-align:center;min-height:18px;}
-  .qr-box{background:#fff;padding:24px;border-radius:4px;}
-  textarea{background:#111;color:#0f0;border:1px solid #444;font-family:monospace;font-size:11px;
-    width:280px;height:72px;resize:none;padding:6px;box-sizing:border-box;}
-  input.code-in{background:#111;color:#fff;border:1px solid #555;font-family:monospace;
-    font-size:13px;width:280px;padding:8px;box-sizing:border-box;text-align:center;}
-  .divider{width:280px;text-align:center;font-size:11px;opacity:0.4;margin:2px 0;}
-  /* scan */
-  #scan-wrap{position:relative;width:260px;height:260px;}
-  #scan-wrap video{width:100%;height:100%;object-fit:cover;border:2px solid #fff;display:block;}
-  /* log */
-  #log-wrap{position:fixed;bottom:0;left:0;right:0;max-height:30vh;overflow-y:auto;
-    background:rgba(0,0,0,0.9);border-top:1px solid #333;font-size:10px;padding:4px 6px;
-    box-sizing:border-box;z-index:9999;}
+  textarea{background:#111;color:#0f0;border:1px solid #444;font-family:monospace;font-size:11px;width:280px;height:80px;resize:none;padding:8px;box-sizing:border-box;border-radius:2px;}
+  .divider{width:280px;text-align:center;font-size:11px;opacity:0.35;margin:2px 0;}
+  #log-wrap{position:fixed;bottom:0;left:0;right:0;max-height:30vh;overflow-y:auto;background:rgba(0,0,0,0.92);border-top:1px solid #333;font-size:10px;padding:4px 6px;box-sizing:border-box;z-index:9999;}
   #log-wrap .e{border-bottom:1px solid #1a1a1a;padding:1px 0;word-break:break-all;}
   .err{color:#f66;}.ok{color:#6f6;}.info{color:#adf;}
-  #log-btn{position:fixed;bottom:4px;right:4px;z-index:10000;background:#333;color:#fff;
-    border:none;font-size:10px;padding:3px 7px;cursor:pointer;opacity:0.8;}
+  #log-btn{position:fixed;bottom:4px;right:4px;z-index:10000;background:#333;color:#fff;border:none;font-size:10px;padding:3px 7px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -51,50 +36,30 @@
     </div>
   </div>
 
-  <!-- HOST: show offer, wait for answer -->
-  <div id="s-host" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+  <!-- HOST -->
+  <div id="s-host" style="display:none;flex-direction:column;align-items:center;gap:12px;">
     <p class="hint" id="host-hint">Generating offer…</p>
-
-    <!-- QR (shown always, works on iOS) -->
-    <div class="qr-box" id="host-qr-wrap" style="display:none;">
-      <canvas id="qr-host" width="240" height="240"></canvas>
-    </div>
-
-    <!-- Share / copy button -->
     <div class="btn-row" id="host-share-btns" style="display:none;">
-      <button id="btn-share">SHARE LINK</button>
+      <button id="btn-share">SHARE CODE</button>
       <button class="sec" id="btn-copy">COPY</button>
     </div>
-
-    <div class="divider" id="host-divider" style="display:none;">── or scan if on iOS ──</div>
-
     <div id="st-host" class="status"></div>
-
-    <!-- After sharing: host needs to receive the answer -->
-    <div id="host-answer-area" style="display:none;flex-direction:column;align-items:center;gap:8px;width:100%;">
-      <p class="hint">Paste the guest's reply code, or scan their QR:</p>
-      <textarea id="ta-answer" placeholder="Paste guest answer code here…"></textarea>
-      <button id="btn-paste-answer">SUBMIT ANSWER</button>
-      <div class="divider">── or ──</div>
-      <button class="sec" id="btn-scan-answer">SCAN GUEST QR</button>
-      <div id="host-scan-area"></div>
+    <div id="host-answer-area" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+      <p class="hint">Paste the guest's reply code:</p>
+      <textarea id="ta-answer" placeholder="Paste guest reply code here…"></textarea>
+      <button id="btn-paste-answer">CONNECT</button>
     </div>
   </div>
 
-  <!-- JOIN: receive offer link / paste, send answer -->
-  <div id="s-join" style="display:none;flex-direction:column;align-items:center;gap:10px;">
-    <p class="hint" id="join-hint">Tap the host's link, or paste the code below:</p>
+  <!-- JOIN -->
+  <div id="s-join" style="display:none;flex-direction:column;align-items:center;gap:12px;">
+    <p class="hint" id="join-hint">Paste the host's code:</p>
     <textarea id="ta-offer" placeholder="Paste host offer code here…"></textarea>
     <button id="btn-submit-offer">CONNECT</button>
-    <div class="divider">── or scan host QR if on iOS ──</div>
-    <button class="sec" id="btn-scan-offer">SCAN HOST QR</button>
-    <div id="join-scan-area"></div>
     <div id="st-join" class="status"></div>
-
-    <!-- answer QR + copy -->
-    <div id="join-answer-area" style="display:none;flex-direction:column;align-items:center;gap:8px;">
-      <p class="hint">Send this to the host (share, copy, or they scan):</p>
-      <div class="qr-box" id="answer-qr-wrap" style="display:none;"><canvas id="qr-answer" width="240" height="240"></canvas></div>
+    <div id="join-answer-area" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+      <p class="hint">Send this reply code to the host:</p>
+      <textarea id="ta-answer-out" readonly></textarea>
       <div class="btn-row">
         <button id="btn-share-answer">SHARE REPLY</button>
         <button class="sec" id="btn-copy-answer">COPY</button>
@@ -106,286 +71,255 @@
 <div id="log-wrap"></div>
 <button id="log-btn" onclick="toggleLog()">LOG</button>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
 <script type="module">
-// ── nimiq qr-scanner ──────────────────────────────────────────────────────────
-const QS_JS  = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js';
-const QS_W   = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js';
-let QrScanner = null;
-async function getQrScanner() {
-  if (QrScanner) return QrScanner;
-  log("loading qr-scanner…");
-  const m = await import(QS_JS);
-  QrScanner = m.default;
-  QrScanner.WORKER_PATH = QS_W;
-  log("qr-scanner ready","ok");
-  return QrScanner;
-}
-
 // ── Log ───────────────────────────────────────────────────────────────────────
 const logWrap = document.getElementById("log-wrap");
 let logVis = true;
-window.toggleLog = () => {
-  logVis = !logVis;
-  logWrap.style.display = logVis?"block":"none";
-};
-function log(m,t="info"){
+window.toggleLog = () => { logVis=!logVis; logWrap.style.display=logVis?"block":"none"; };
+function log(m, t="info") {
   console.log(m);
-  const d=document.createElement("div");
-  d.className="e "+t;
-  d.textContent=new Date().toISOString().substr(11,8)+" "+m;
-  logWrap.appendChild(d); logWrap.scrollTop=logWrap.scrollHeight;
+  const d = document.createElement("div");
+  d.className = "e "+t;
+  d.textContent = new Date().toISOString().substr(11,8)+" "+m;
+  logWrap.appendChild(d); logWrap.scrollTop = logWrap.scrollHeight;
 }
-window.onerror=(m,s,l)=>log("ERR:"+m+" "+s+":"+l,"err");
-window.onunhandledrejection=e=>log("PROMISE:"+(e.reason?.message||e.reason),"err");
-
-// ── QR draw ───────────────────────────────────────────────────────────────────
-function drawQR(el, text) {
-  log("drawQR len="+text.length);
-  const sz=Math.min(240,Math.floor(window.innerWidth*0.65));
-  el.width=sz; el.height=sz;
-  const tmp=document.createElement("div");
-  new QRCode(tmp,{text,width:sz,height:sz,colorDark:"#000",colorLight:"#fff",correctLevel:QRCode.CorrectLevel.M});
-  const src=tmp.querySelector("canvas")||tmp.querySelector("img");
-  if(!src){log("QR gen failed","err");return;}
-  const draw=()=>el.getContext("2d").drawImage(src,0,0,sz,sz);
-  src.tagName==="CANVAS"||src.complete?draw():(src.onload=draw);
-}
+window.onerror = (m,s,l) => log("ERR:"+m+" "+s+":"+l,"err");
+window.onunhandledrejection = e => log("PROMISE:"+(e.reason?.message||e.reason),"err");
 
 // ── SDP pack/unpack ───────────────────────────────────────────────────────────
-function extr(sdp,pfx){const l=sdp.split("\n").find(l=>l.trimStart().startsWith(pfx));return l?l.trim().slice(pfx.length).trim():"";}
-function packSDP(sdpObj){
-  const s=sdpObj.sdp;
-  const type=sdpObj.type==="offer"?"o":"a";
-  const ufrag=extr(s,"a=ice-ufrag:");
-  const pwd=extr(s,"a=ice-pwd:");
-  const fp=extr(s,"a=fingerprint:").replace(/^sha-256 /i,"");
-  const setup=extr(s,"a=setup:");
-  const cands=s.split("\n").filter(l=>l.trimStart().startsWith("a=candidate:")).map(l=>l.trim().slice("a=candidate:".length));
-  const cand=cands.find(c=>c.includes("srflx"))||cands[0]||"";
-  const packed=[type,ufrag,pwd,fp,setup,cand].join("|");
-  log("packed="+packed.length);
+function extr(sdp, pfx) {
+  const l = sdp.split("\n").find(l => l.trimStart().startsWith(pfx));
+  return l ? l.trim().slice(pfx.length).trim() : "";
+}
+function packSDP(sdpObj) {
+  const s = sdpObj.sdp;
+  const type  = sdpObj.type === "offer" ? "o" : "a";
+  const ufrag = extr(s, "a=ice-ufrag:");
+  const pwd   = extr(s, "a=ice-pwd:");
+  const fp    = extr(s, "a=fingerprint:").replace(/^sha-256 /i, "");
+  const setup = extr(s, "a=setup:");
+  const cands = s.split("\n")
+    .filter(l => l.trimStart().startsWith("a=candidate:"))
+    .map(l => l.trim().slice("a=candidate:".length));
+  // prefer srflx (STUN-derived, works across NAT), then host
+  const cand = cands.find(c => c.includes("srflx")) || cands[0] || "";
+  const packed = [type, ufrag, pwd, fp, setup, cand].join("|");
+  log("packed="+packed.length+" chars");
   return btoa(packed).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 }
-function unpackSDP(enc){
-  const packed=atob(enc.trim().replace(/-/g,"+").replace(/_/g,"/"));
-  const [type,ufrag,pwd,fp,setup,cand]=packed.split("|");
-  const sdp=["v=0","o=- 1 1 IN IP4 0.0.0.0","s=-","t=0 0","a=group:BUNDLE 0",
+function unpackSDP(enc) {
+  const packed = atob(enc.trim().replace(/-/g,"+").replace(/_/g,"/"));
+  const [type, ufrag, pwd, fp, setup, cand] = packed.split("|");
+  const sdp = [
+    "v=0","o=- 1 1 IN IP4 0.0.0.0","s=-","t=0 0","a=group:BUNDLE 0",
     "m=application 9 UDP/DTLS/SCTP webrtc-datachannel","c=IN IP4 0.0.0.0",
-    "a=ice-ufrag:"+ufrag,"a=ice-pwd:"+pwd,"a=ice-options:trickle",
-    "a=fingerprint:sha-256 "+fp,"a=setup:"+setup,"a=mid:0",
-    "a=sctp-port:5000","a=max-message-size:262144",
-    cand?"a=candidate:"+cand:""].filter(Boolean).join("\r\n")+"\r\n";
-  return{type:type==="o"?"offer":"answer",sdp};
+    "a=ice-ufrag:"+ufrag, "a=ice-pwd:"+pwd, "a=ice-options:trickle",
+    "a=fingerprint:sha-256 "+fp, "a=setup:"+setup, "a=mid:0",
+    "a=sctp-port:5000", "a=max-message-size:262144",
+    cand ? "a=candidate:"+cand : ""
+  ].filter(Boolean).join("\r\n")+"\r\n";
+  log("unpacked type="+(type==="o"?"offer":"answer")+" sdpLen="+sdp.length);
+  return { type: type==="o" ? "offer" : "answer", sdp };
 }
 
-// ── Share / copy helpers ──────────────────────────────────────────────────────
-function makeURL(payload, role) {
-  const u = new URL(location.href);
-  u.hash = role + payload;   // #o<payload> for offer, #a<payload> for answer
-  return u.toString();
-}
-async function shareOrCopy(url, label) {
+// ── Share / copy (raw code only, no URL) ─────────────────────────────────────
+async function shareCode(code, label) {
+  const text = code;
   if (navigator.share) {
-    try { await navigator.share({title:"Pong "+label, url}); return; } catch(e){}
+    try { await navigator.share({ title: "Pong "+label, text }); return; } catch(e) { log("share cancelled/failed: "+e.message); }
   }
-  await copyText(url);
+  await copyCode(code);
   alert("Copied! Send to the other player.");
 }
-async function copyText(t) {
-  try { await navigator.clipboard.writeText(t); log("copied","ok"); }
-  catch(e) { log("copy failed: "+e.message,"err"); }
+async function copyCode(code) {
+  try { await navigator.clipboard.writeText(code); log("copied","ok"); }
+  catch(e) { log("clipboard err: "+e.message,"err"); }
 }
 
-// ── Handle incoming hash (guest opens the link) ───────────────────────────────
+// ── Handle URL hash (auto-fill if opened via shared link) ────────────────────
 function checkHash() {
   const h = location.hash.slice(1);
+  if (!h) return;
+  history.replaceState(null,"",location.pathname); // clean the URL
   if (h.startsWith("o")) {
-    log("detected offer in URL hash");
-    // Auto-fill guest textarea and switch to join screen
+    log("offer detected in URL");
     showScreen("s-join");
     document.getElementById("ta-offer").value = h.slice(1);
-    setEl("join-hint","Offer received! Tap CONNECT");
+    setEl("join-hint","Offer received — tap CONNECT");
   } else if (h.startsWith("a")) {
-    log("detected answer in URL hash");
-    // Auto-fill host answer textarea
+    log("answer detected in URL");
     showScreen("s-host");
-    setEl("host-hint","Answer received!");
-    document.getElementById("host-answer-area").style.display="flex";
+    document.getElementById("host-answer-area").style.display = "flex";
     document.getElementById("ta-answer").value = h.slice(1);
-    setEl("st-host","Tap SUBMIT ANSWER to connect");
+    setEl("host-hint","Reply received — tap CONNECT");
   }
 }
 
-// ── Scanner helper ────────────────────────────────────────────────────────────
-async function startScanner(container, onResult) {
-  const Qs = await getQrScanner();
-  container.innerHTML="";
-  const vid=document.createElement("video");
-  vid.setAttribute("autoplay",""); vid.setAttribute("playsinline",""); vid.setAttribute("muted","");
-  vid.style.cssText="width:260px;height:260px;object-fit:cover;border:2px solid #0f0;display:block;";
-  container.appendChild(vid);
-  const scanner = new Qs(vid, r=>{
-    log("scanned len="+r.data.length,"ok");
-    scanner.stop(); scanner.destroy();
-    container.innerHTML="";
-    onResult(r.data);
-  },{returnDetailedScanResult:true,preferredCamera:"environment",maxScansPerSecond:8,highlightScanRegion:true});
-  await scanner.start();
-  log("scanner started","ok");
-}
+// ── WebRTC ────────────────────────────────────────────────────────────────────
+const RTC_CFG = { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:stun.stunprotocol.org:3478" },
+]};
+let pc = null, dc = null, role = null;
 
-// ── RTC ───────────────────────────────────────────────────────────────────────
-const RTC_CFG={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
-let pc=null, dc=null, role=null;
-
-function createPC(){
+function createPC() {
   log("createPC");
-  pc=new RTCPeerConnection(RTC_CFG);
-  pc.onicecandidate=e=>log("cand:"+(e.candidate?e.candidate.type:"done"));
-  pc.onicegatheringstatechange=()=>log("iceGather:"+pc.iceGatheringState);
-  pc.oniceconnectionstatechange=()=>log("iceCon:"+pc.iceConnectionState);
+  pc = new RTCPeerConnection(RTC_CFG);
+  pc.onicecandidate = e => {
+    if (e.candidate) log("cand: "+e.candidate.type+" "+e.candidate.protocol);
+    else log("ICE candidates exhausted (null candidate)");
+  };
+  pc.onicegatheringstatechange = () => log("iceGather: "+pc.iceGatheringState);
+  pc.oniceconnectionstatechange = () => {
+    log("iceCon: "+pc.iceConnectionState);
+    if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed")
+      log("CONNECTED!", "ok");
+  };
   return pc;
 }
-function waitICE(pc,ms=6000){
-  return new Promise(res=>{
-    if(pc.iceGatheringState==="complete"){log("ICE done already");return res();}
-    pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState==="complete"){log("ICE done","ok");res();}};
-    setTimeout(()=>{log("ICE timeout");res();},ms);
+
+// Wait for ICE — resolves as soon as we have at least one srflx candidate OR gathering completes
+function waitICE(pc) {
+  return new Promise(res => {
+    let done = false;
+    const finish = (reason) => {
+      if (done) return; done = true;
+      log("ICE wait done: "+reason, "ok");
+      res();
+    };
+    // Resolve immediately on null candidate (gathering complete)
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        log("cand: "+e.candidate.type+" "+e.candidate.protocol);
+        // Resolve as soon as we have a srflx — don't wait for more
+        if (e.candidate.type === "srflx") finish("got srflx");
+      } else {
+        finish("null candidate (gathering done)");
+      }
+    };
+    pc.onicegatheringstatechange = () => {
+      log("iceGather: "+pc.iceGatheringState);
+      if (pc.iceGatheringState === "complete") finish("gatheringState=complete");
+    };
+    // Hard timeout — 12s to give STUN servers time on slow mobile connections
+    setTimeout(() => finish("timeout 12s"), 12000);
   });
 }
 
-// ── HOST flow ─────────────────────────────────────────────────────────────────
-async function startHost(){
-  log("startHost"); role="host";
+// ── HOST ──────────────────────────────────────────────────────────────────────
+async function startHost() {
+  log("startHost"); role = "host";
   showScreen("s-host");
   setEl("host-hint","Generating offer…");
 
-  pc=createPC();
-  dc=pc.createDataChannel("pong");
+  pc = createPC();
+  dc = pc.createDataChannel("pong");
   setupDC(dc);
 
-  const offer=await pc.createOffer();
+  const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  log("local desc set, waiting for ICE…");
   await waitICE(pc);
 
-  const payload=packSDP(pc.localDescription);
-  log("offer payload len="+payload.length);
+  const payload = packSDP(pc.localDescription);
+  log("offer ready, len="+payload.length);
 
-  // Show QR (for iOS guest)
-  document.getElementById("host-qr-wrap").style.display="block";
-  drawQR(document.getElementById("qr-host"), payload);
+  setEl("host-hint","Share your offer code with the guest:");
+  document.getElementById("host-share-btns").style.display = "flex";
+  document.getElementById("btn-share").onclick = () => shareCode(payload, "Offer");
+  document.getElementById("btn-copy").onclick  = async () => { await copyCode(payload); alert("Copied!"); };
 
-  // Share / copy buttons
-  const offerURL = makeURL(payload,"o");
-  document.getElementById("host-share-btns").style.display="flex";
-  document.getElementById("host-divider").style.display="block";
-  document.getElementById("btn-share").onclick=()=>shareOrCopy(offerURL,"Offer");
-  document.getElementById("btn-copy").onclick=async()=>{await copyText(offerURL);alert("Copied!");};
+  setEl("st-host","Waiting for guest reply…");
+  document.getElementById("host-answer-area").style.display = "flex";
 
-  setEl("host-hint","Share link with guest, then wait for their reply");
-  setEl("st-host","Waiting for guest…");
-  document.getElementById("host-answer-area").style.display="flex";
-
-  document.getElementById("btn-paste-answer").onclick=()=>{
-    const v=document.getElementById("ta-answer").value.trim();
-    if(v) applyAnswer(v); else alert("Paste the guest's code first");
-  };
-  document.getElementById("btn-scan-answer").onclick=()=>{
-    startScanner(document.getElementById("host-scan-area"), applyAnswer);
+  document.getElementById("btn-paste-answer").onclick = () => {
+    const v = document.getElementById("ta-answer").value.trim();
+    if (v) applyAnswer(v); else alert("Paste the guest code first");
   };
 }
 
-async function applyAnswer(data){
+async function applyAnswer(raw) {
   log("applyAnswer");
-  try{
-    // data might be a full URL (hash) or raw payload
-    let payload=data;
-    if(data.includes("#")) payload=new URL(data).hash.slice(2); // skip #a
-    const sdpObj=unpackSDP(payload);
+  try {
+    // strip URL wrapper if someone accidentally shared a link
+    let code = raw;
+    if (raw.includes("#")) code = new URL(raw).hash.slice(2);
+    const sdpObj = unpackSDP(code);
     await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
-    log("host remote desc set","ok");
+    log("host remoteDesc set","ok");
     setEl("st-host","Connecting…");
-  }catch(e){log("applyAnswer err:"+e.message,"err");}
+  } catch(e) { log("applyAnswer err: "+e.message,"err"); }
 }
 
-// ── GUEST flow ────────────────────────────────────────────────────────────────
-async function startJoin(){
-  log("startJoin"); role="guest";
-  showScreen("s-join");
-  document.getElementById("btn-scan-offer").onclick=()=>{
-    startScanner(document.getElementById("join-scan-area"), processOffer);
-  };
-  document.getElementById("btn-submit-offer").onclick=()=>{
-    const v=document.getElementById("ta-offer").value.trim();
-    if(v) processOffer(v); else alert("Paste the host's code first");
-  };
-}
-
-async function processOffer(data){
+// ── GUEST ─────────────────────────────────────────────────────────────────────
+async function processOffer(raw) {
   log("processOffer");
   setEl("st-join","Processing…");
-  try{
-    let payload=data;
-    if(data.includes("#")) payload=new URL(data).hash.slice(2); // skip #o
-    const sdpObj=unpackSDP(payload);
-    pc=createPC();
-    pc.ondatachannel=e=>{log("ondatachannel","ok");dc=e.channel;setupDC(dc);};
-    await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
-    const answer=await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await waitICE(pc);
-    const answerPayload=packSDP(pc.localDescription);
-    const answerURL=makeURL(answerPayload,"a");
-    log("answer payload="+answerPayload.length);
+  try {
+    let code = raw;
+    if (raw.includes("#")) code = new URL(raw).hash.slice(2);
+    const sdpObj = unpackSDP(code);
 
-    // Show answer QR + share
-    document.getElementById("join-answer-area").style.display="flex";
-    document.getElementById("answer-qr-wrap").style.display="block";
-    drawQR(document.getElementById("qr-answer"), answerPayload);
-    document.getElementById("btn-share-answer").onclick=()=>shareOrCopy(answerURL,"Answer");
-    document.getElementById("btn-copy-answer").onclick=async()=>{await copyText(answerURL);alert("Copied!");};
-    setEl("join-hint","Send reply to host:");
-    setEl("st-join","Waiting for host to apply answer…");
-  }catch(e){log("processOffer err:"+e.message,"err");}
+    pc = createPC();
+    pc.ondatachannel = e => { log("ondatachannel","ok"); dc = e.channel; setupDC(dc); };
+    await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    log("guest local desc set, waiting for ICE…");
+    await waitICE(pc);
+
+    const answerPayload = packSDP(pc.localDescription);
+    log("answer ready, len="+answerPayload.length);
+
+    setEl("join-hint","Send this reply code to the host:");
+    const ta = document.getElementById("ta-answer-out");
+    ta.value = answerPayload;
+    document.getElementById("join-answer-area").style.display = "flex";
+    document.getElementById("btn-share-answer").onclick = () => shareCode(answerPayload, "Reply");
+    document.getElementById("btn-copy-answer").onclick  = async () => { await copyCode(answerPayload); alert("Copied!"); };
+    setEl("st-join","Waiting for host to connect…");
+  } catch(e) { log("processOffer err: "+e.message,"err"); }
 }
 
 // ── DataChannel ───────────────────────────────────────────────────────────────
-function setupDC(ch){
+function setupDC(ch) {
   log("setupDC");
-  ch.onopen=()=>{log("DC open!","ok");hideUI();initState();myX=W/2;gameRunning=true;};
-  ch.onclose=()=>log("DC closed","err");
-  ch.onerror=e=>log("DC err:"+e,"err");
-  ch.onmessage=e=>{
-    const msg=JSON.parse(e.data);
-    if(msg.type==="state"&&role==="guest"){
-      const s=msg.state;
-      state.guest.x=s.guest.x;state.host.x=s.host.x;
-      state.score={host:s.score.guest,guest:s.score.host};
-      state.ball.x=s.ball.x;state.ball.y=H-s.ball.y;
-      state.paused=s.paused;gameResult="";
-      if(s.paused&&s.score.host>=MAX_SCORE)gameResult="guest";
-      if(s.paused&&s.score.guest>=MAX_SCORE)gameResult="host";
-      const t={...state.host};state.host={...state.guest};state.guest=t;
-    }else if(msg.type==="input"&&role==="host"){state.guest.x=msg.x;}
+  ch.onopen  = () => { log("DC open!","ok"); hideUI(); initState(); myX=W/2; gameRunning=true; };
+  ch.onclose = () => log("DC closed","err");
+  ch.onerror = e => log("DC err: "+e,"err");
+  ch.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type==="state" && role==="guest") {
+      const s = msg.state;
+      state.guest.x=s.guest.x; state.host.x=s.host.x;
+      state.score={host:s.score.guest, guest:s.score.host};
+      state.ball.x=s.ball.x; state.ball.y=H-s.ball.y;
+      state.paused=s.paused; gameResult="";
+      if (s.paused&&s.score.host>=MAX_SCORE)  gameResult="guest";
+      if (s.paused&&s.score.guest>=MAX_SCORE) gameResult="host";
+      const t={...state.host}; state.host={...state.guest}; state.guest=t;
+    } else if (msg.type==="input" && role==="host") {
+      state.guest.x=msg.x;
+    }
   };
 }
 
 // ── Game ──────────────────────────────────────────────────────────────────────
-const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+const canvas=document.getElementById("game"), ctx=canvas.getContext("2d");
 let W,H;
 function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
-window.addEventListener("resize",resize);resize();
-const MAX_SCORE=5,PAD={w:120,h:12,margin:30};
-let gameRunning=false,gameResult="";
+window.addEventListener("resize",resize); resize();
+const MAX_SCORE=5, PAD={w:120,h:12,margin:30};
+let gameRunning=false, gameResult="";
 let state={ball:{x:0,y:0},host:{x:0},guest:{x:0},score:{host:0,guest:0},paused:true};
-let myX=0,ballSpeed=300,ballVx=0,ballVy=0;
+let myX=0, ballSpeed=300, ballVx=0, ballVy=0;
 function initState(){state.ball.x=W/2;state.ball.y=H/2;state.host.x=W/2;state.guest.x=W/2;state.score={host:0,guest:0};ballSpeed=300;myX=W/2;serveBall();}
 function serveBall(){const a=(Math.random()*Math.PI/3)-Math.PI/6,d=Math.random()>.5?1:-1;ballVx=Math.sin(a);ballVy=Math.cos(a)*d;state.ball.x=W/2;state.ball.y=H/2;state.paused=true;setTimeout(()=>{state.paused=false;},800);}
 function hostUpdate(dt){
   if(state.paused)return;
-  state.ball.x+=ballVx*ballSpeed*dt;state.ball.y+=ballVy*ballSpeed*dt;
+  state.ball.x+=ballVx*ballSpeed*dt; state.ball.y+=ballVy*ballSpeed*dt;
   if(state.ball.x<0||state.ball.x>W)ballVx*=-1;
   if(state.ball.y>H-PAD.margin-PAD.h&&Math.abs(state.ball.x-state.host.x)<PAD.w/2)hitPad(state.host.x,-1);
   if(state.ball.y<PAD.margin+PAD.h&&Math.abs(state.ball.x-state.guest.x)<PAD.w/2)hitPad(state.guest.x,1);
@@ -419,10 +353,16 @@ function hideUI(){document.getElementById("ui").style.display="none";}
 function setEl(id,t){const e=document.getElementById(id);if(e)e.textContent=t;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 
-document.getElementById("btn-host").onclick=startHost;
-document.getElementById("btn-join").onclick=startJoin;
+document.getElementById("btn-host").onclick = startHost;
+document.getElementById("btn-join").onclick  = () => {
+  showScreen("s-join");
+  document.getElementById("btn-submit-offer").onclick = () => {
+    const v = document.getElementById("ta-offer").value.trim();
+    if (v) processOffer(v); else alert("Paste the host code first");
+  };
+};
 
-checkHash(); // handle if page opened via link
+checkHash();
 log("ready | RTC="+(typeof RTCPeerConnection)+" | share="+(!!navigator.share));
 </script>
 </body>
