@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Optical Link Robust</title>
+<title>Optical Link Stable</title>
 
 <style>
 body {
@@ -22,9 +22,7 @@ body {
   display:none;
 }
 
-canvas {
-  width:100%;
-}
+canvas { width:100%; }
 
 #bits, #log {
   font-size:10px;
@@ -58,6 +56,9 @@ const GRID = 6;
 const FRAME_BITS = GRID * GRID;
 const PREAMBLE = "10101010101010101010101010101010";
 
+// smoothing buffers
+let history = [];
+
 // ===== LOG =====
 const logEl = document.getElementById("log");
 function log(m){
@@ -85,15 +86,15 @@ function buildPayload(str){
   return PREAMBLE + len + data;
 }
 
-// ===== SENDER (RED / BLUE) =====
+// ===== SENDER =====
 async function startSender(){
   const msg = prompt("Message", "HELLO");
   if(!msg) return;
 
-await new Promise((r) => setTimeout(() => r(), 3000));
+  log("⏳ Waiting 3s...");
+  await sleep(3000);
 
   const bits = buildPayload(msg);
-
   const flash = document.getElementById("flash");
   const progress = document.getElementById("progress");
 
@@ -110,10 +111,9 @@ await new Promise((r) => setTimeout(() => r(), 3000));
     for(let b of chunk){
       const div=document.createElement("div");
 
-      // 🔥 ROBUST COLORS
       div.style.background = b==="1"
-        ? "rgb(255,0,0)"   // RED
-        : "rgb(0,0,255)";  // BLUE
+        ? "rgb(255,0,0)"
+        : "rgb(0,0,255)";
 
       flash.appendChild(div);
     }
@@ -161,39 +161,57 @@ async function startReceiver(){
     const cellW = canvas.width/GRID;
     const cellH = canvas.height/GRID;
 
-    let chunk="";
+    let frameBits = [];
 
     for(let y=0;y<GRID;y++){
       for(let x=0;x<GRID;x++){
 
-        const startX = x*cellW;
-        const startY = y*cellH;
+        const cx = Math.floor((x+0.5)*cellW);
+        const cy = Math.floor((y+0.5)*cellH);
 
-        // sample small area (noise reduction)
-        const img = ctx.getImageData(startX, startY, cellW/2, cellH/2);
+        const size = 6; // small center sample
+        const img = ctx.getImageData(cx-size/2, cy-size/2, size, size);
 
-        let r=0,g=0,b=0,count=0;
+        let r=0,b=0,count=0;
 
         for(let i=0;i<img.data.length;i+=4){
           r+=img.data[i];
-          g+=img.data[i+1];
           b+=img.data[i+2];
           count++;
         }
 
-        r/=count; g/=count; b/=count;
+        r/=count;
+        b/=count;
 
-        // 🔥 COLOR DECISION
-        const bit = r > b ? "1" : "0";
-        chunk += bit;
+        // 🔥 CONFIDENCE THRESHOLD
+        let bit;
+        if(Math.abs(r-b) < 30){
+          bit = null; // uncertain
+        } else {
+          bit = r > b ? 1 : 0;
+        }
 
-        // overlay
+        frameBits.push(bit);
+
         ctx.strokeStyle="white";
-        ctx.strokeRect(startX,startY,cellW,cellH);
-
-        ctx.fillStyle="white";
-        ctx.fillText(bit, startX+10, startY+20);
+        ctx.strokeRect(x*cellW,y*cellH,cellW,cellH);
       }
+    }
+
+    // --- TEMPORAL SMOOTHING ---
+    history.push(frameBits);
+    if(history.length > 3) history.shift();
+
+    let chunk="";
+    for(let i=0;i<FRAME_BITS;i++){
+      let ones=0, zeros=0;
+
+      for(let h of history){
+        if(h[i]===1) ones++;
+        if(h[i]===0) zeros++;
+      }
+
+      chunk += ones > zeros ? "1" : "0";
     }
 
     buffer += chunk;
