@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sound Link PRO</title>
+<title>Sound Link Robust</title>
 
 <style>
 body {
@@ -31,7 +31,6 @@ body {
 <div id="ui">
   <button onclick="startSender()">Sender</button>
   <button onclick="startReceiver()">Receiver</button>
-  <div id="progress"></div>
 </div>
 
 <div id="bits">Idle</div>
@@ -39,14 +38,17 @@ body {
 
 <script>
 // ===== CONFIG =====
-const BASE = 800;
-const STEP = 120;
-const SYMBOL_BITS = 4;
-const SYMBOL_TIME = 35; // slightly faster
-const THRESHOLD = 120;
-const CHANGE_THRESHOLD = 60; // Hz change to detect new symbol
+const SYMBOL_TIME = 60;
 
-const PREAMBLE = "10101010101010101010101010101010";
+const FREQS = {
+  "00": 900,
+  "01": 1300,
+  "10": 1700,
+  "11": 2100
+};
+
+const START_FREQ = 2600;
+const END_FREQ = 3000;
 
 // ===== LOG =====
 const logEl = document.getElementById("log");
@@ -70,44 +72,37 @@ function bitsToStr(bits){
   return out;
 }
 
-function buildPayload(str){
-  const data = strToBits(str);
-  const len = data.length.toString(2).padStart(32,"0");
-  return PREAMBLE + len + data;
-}
-
 // ===== SENDER =====
 async function startSender(){
-  const msg = prompt("Message", "HELLO WORLD");
+  const msg = prompt("Message", "HELLO");
   if(!msg) return;
 
-  log("⏳ 3s delay...");
-  await sleep(3000);
+  log("⏳ 2s...");
+  await sleep(2000);
 
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const bits = buildPayload(msg);
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  osc.type="sine";
+  osc.connect(ctx.destination);
+  osc.start();
 
-  const progress = document.getElementById("progress");
+  // START
+  osc.frequency.value = START_FREQ;
+  await sleep(500);
 
-  for(let i=0;i<bits.length;i+=SYMBOL_BITS){
-    const chunk = bits.slice(i,i+SYMBOL_BITS).padEnd(SYMBOL_BITS,"0");
-    const value = parseInt(chunk,2);
-    const freq = BASE + value * STEP;
+  const bits = strToBits(msg);
 
-    const osc = audioCtx.createOscillator();
-    osc.type="sine";
-    osc.frequency.value = freq;
-
-    osc.connect(audioCtx.destination);
-    osc.start();
-
+  for(let i=0;i<bits.length;i+=2){
+    const chunk = bits.slice(i,i+2).padEnd(2,"0");
+    osc.frequency.value = FREQS[chunk];
     await sleep(SYMBOL_TIME);
-    osc.stop();
-
-    progress.innerText =
-      `Sending ${Math.floor(i/bits.length*100)}%`;
   }
 
+  // END
+  osc.frequency.value = END_FREQ;
+  await sleep(500);
+
+  osc.stop();
   log("📤 Done");
 }
 
@@ -115,113 +110,98 @@ async function startSender(){
 async function startReceiver(){
   const stream = await navigator.mediaDevices.getUserMedia({audio:true});
 
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = audioCtx.createMediaStreamSource(stream);
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
 
-  const analyser = audioCtx.createAnalyser();
+  const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
-
-  source.connect(analyser);
+  src.connect(analyser);
 
   const data = new Uint8Array(analyser.frequencyBinCount);
 
-  let buffer="";
-  let synced=false;
-  let expectedLen=null;
-
-  let lastFreq = 0;
-  let lastValue = null;
+  let receiving = false;
+  let bits = "";
 
   log("🎧 Listening...");
 
-  function loop(){
+  function getFreq(){
     analyser.getByteFrequencyData(data);
-
-    let maxVal = 0;
-    let index = 0;
+    let max=0,iMax=0;
 
     for(let i=0;i<data.length;i++){
-      if(data[i] > maxVal){
-        maxVal = data[i];
-        index = i;
+      if(data[i]>max){
+        max=data[i];
+        iMax=i;
       }
     }
 
-    if(maxVal < THRESHOLD){
-      document.getElementById("bits").innerText = "No signal...";
-      requestAnimationFrame(loop);
-      return;
+    return iMax * ctx.sampleRate / (data.length*2);
+  }
+
+  async function readSymbol(){
+    let samples = [];
+
+    for(let i=0;i<5;i++){
+      samples.push(getFreq());
+      await sleep(10);
     }
 
-    const freq = index * audioCtx.sampleRate / (data.length * 2);
+    // average
+    const avg = samples.reduce((a,b)=>a+b,0)/samples.length;
 
-    // ===== SMOOTHING =====
-    const smoothFreq = lastFreq * 0.7 + freq * 0.3;
+    return avg;
+  }
 
-    const value = Math.round((smoothFreq - BASE) / STEP);
+  async function loop(){
+    while(true){
 
-    if(value < 0 || value > 15){
-      requestAnimationFrame(loop);
-      return;
-    }
+      const freq = await readSymbol();
 
-    // ===== EDGE DETECTION =====
-    const freqDiff = Math.abs(smoothFreq - lastFreq);
-
-    if(freqDiff > CHANGE_THRESHOLD && value !== lastValue){
-
-      const bits = value.toString(2).padStart(4,"0");
-      buffer += bits;
-
-      lastValue = value;
-
-      // ===== SYNC =====
-      if(!synced && buffer.includes(PREAMBLE)){
-        log("📡 Sync locked");
-        buffer = buffer.split(PREAMBLE)[1];
-        synced=true;
+      // START
+      if(!receiving && Math.abs(freq - START_FREQ) < 200){
+        log("🚀 START");
+        receiving = true;
+        bits = "";
+        continue;
       }
 
-      // ===== LENGTH =====
-      if(synced && !expectedLen && buffer.length>=32){
-        expectedLen = parseInt(buffer.slice(0,32),2);
-        buffer = buffer.slice(32);
-        log("📏 Bits expected: " + expectedLen);
+      // END
+      if(receiving && Math.abs(freq - END_FREQ) < 200){
+        log("🏁 END");
+
+        const msg = bitsToStr(bits);
+        log("📥 " + msg);
+
+        stream.getTracks().forEach(t=>t.stop());
+        return;
       }
-    }
 
-    lastFreq = smoothFreq;
+      if(!receiving) continue;
 
-    // ===== LIVE DECODE =====
-    let decoded = "";
-    let usableBits = buffer;
+      // decode symbol
+      let best=null, minDiff=9999;
 
-    if(expectedLen){
-      usableBits = buffer.slice(0, expectedLen);
-    }
+      for(let k in FREQS){
+        const diff = Math.abs(freq - FREQS[k]);
+        if(diff < minDiff){
+          minDiff = diff;
+          best = k;
+        }
+      }
 
-    const fullBytes = Math.floor(usableBits.length / 8) * 8;
-    decoded = bitsToStr(usableBits.slice(0, fullBytes));
+      if(best){
+        bits += best;
+      }
 
-    document.getElementById("bits").innerText =
-`Signal OK
-Freq: ${Math.floor(smoothFreq)} Hz
-Value: ${value}
-
-Decoded (live):
-${decoded}
+      document.getElementById("bits").innerText =
+`Freq: ${Math.floor(freq)} Hz
 
 Bits:
-${buffer.slice(-200)}`;
+${bits.slice(-200)}
 
-    // ===== DONE =====
-    if(expectedLen && buffer.length >= expectedLen){
-      log("📥 FINAL: " + decoded);
-      stream.getTracks().forEach(t=>t.stop());
-      return;
+Decoded:
+${bitsToStr(bits)}`;
     }
-
-    requestAnimationFrame(loop);
   }
 
   loop();
