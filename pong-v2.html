@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Pong P2P Debug FIXED</title>
+<title>Pong P2P</title>
 
 <style>
 body {
@@ -11,8 +11,12 @@ body {
   background:black;
   color:white;
   font-family:monospace;
+  overflow:hidden;
+  touch-action:none;
 }
+
 #ui { padding:15px; }
+canvas { display:none; }
 
 textarea {
   width:100%;
@@ -42,6 +46,7 @@ button {
   background:#000;
   font-size:11px;
   border-top:1px solid #333;
+  display:none;
 }
 </style>
 </head>
@@ -50,6 +55,7 @@ button {
 <div id="ui">
   <button onclick="host()">Host Game</button>
   <button onclick="join()">Join Game</button>
+  <button onclick="toggleLog()">Toggle Debug</button>
 
   <p>📤 Send this:</p>
   <textarea id="out"></textarea>
@@ -58,126 +64,98 @@ button {
   <p>📥 Paste received:</p>
   <textarea id="in"></textarea>
   <button onclick="processSignal()">Process</button>
-
-  <button onclick="log('BUTTON OK')">Test Log</button>
 </div>
 
+<canvas id="game"></canvas>
 <div id="log"></div>
 
 <script>
-// ✅ CONFIRM JS IS RUNNING
-alert("JS LOADED");
+// --- LOG ---
+const logEl = document.getElementById("log");
+
+function log(msg){
+  const time = new Date().toLocaleTimeString();
+  logEl.innerHTML += `[${time}] ${msg}<br>`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function toggleLog(){
+  logEl.style.display = logEl.style.display === "none" ? "block" : "none";
+}
+
+// --- ERROR CAPTURE ---
+window.onerror = (m,s,l,c)=>log(`❌ JS Error: ${m} @${l}:${c}`);
+window.onunhandledrejection = e=>log(`❌ Promise: ${e.reason}`);
 
 // --- DOM ---
 const out = document.getElementById("out");
 const input = document.getElementById("in");
-const logEl = document.getElementById("log");
-
-// --- LOG ---
-function log(msg){
-  try {
-    if (!logEl) {
-      alert("LOG FAIL: " + msg);
-      return;
-    }
-    logEl.innerHTML += msg + "<br>";
-    logEl.scrollTop = logEl.scrollHeight;
-  } catch (e) {
-    alert("LOG ERROR: " + msg);
-  }
-}
-
-// --- GLOBAL ERROR CAPTURE ---
-window.onerror = function(message, source, lineno, colno) {
-  log(`❌ JS Error: ${message} @${lineno}:${colno}`);
-};
-
-window.onunhandledrejection = function(event) {
-  log(`❌ Promise Error: ${event.reason}`);
-};
 
 // --- WEBRTC ---
 let pc, dc, isHost=false;
 
 function setup(){
-  try {
-    log("🟡 Creating RTCPeerConnection...");
-    pc = new RTCPeerConnection();
+  log("🟡 Creating PeerConnection");
 
-    pc.onicecandidate = e=>{
-      if(!e.candidate){
-        log("✅ ICE complete");
-        out.value = JSON.stringify(pc.localDescription);
-      } else {
-        log("🧊 ICE candidate...");
-      }
-    };
+  pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" }
+    ]
+  });
 
-    pc.onconnectionstatechange = ()=>{
-      log("🔗 Connection: " + pc.connectionState);
-    };
+  pc.onicecandidate = e=>{
+    if(!e.candidate){
+      log("✅ ICE complete");
+      out.value = JSON.stringify(pc.localDescription);
+    }
+  };
 
-    pc.oniceconnectionstatechange = ()=>{
-      log("🧊 ICE state: " + pc.iceConnectionState);
-    };
+  pc.oniceconnectionstatechange = ()=>{
+    log("🧊 ICE: " + pc.iceConnectionState);
+  };
 
-    pc.ondatachannel = e=>{
-      log("📡 Data channel received");
-      dc = e.channel;
-      setupDC();
-    };
+  pc.onconnectionstatechange = ()=>{
+    log("🔗 Conn: " + pc.connectionState);
+  };
 
-  } catch(err){
-    log("❌ setup error: " + err);
-  }
+  pc.ondatachannel = e=>{
+    log("📡 Data channel received");
+    dc = e.channel;
+    setupDC();
+  };
 }
 
 function setupDC(){
-  try {
-    dc.onopen = ()=>{
-      log("🟢 Data channel open");
-    };
+  dc.onopen = ()=>{
+    log("🟢 Data channel open");
+    startGame();
+  };
 
-    dc.onmessage = e=>{
-      log("⬇️ " + e.data);
-    };
-
-  } catch(err){
-    log("❌ setupDC error: " + err);
-  }
+  dc.onmessage = e=>{
+    handle(JSON.parse(e.data));
+  };
 }
 
 // --- SIGNALING ---
 async function host(){
   try {
-    log("🚀 Host clicked");
+    log("🚀 Host");
 
     isHost=true;
     setup();
 
-    log("📡 Creating data channel...");
     dc = pc.createDataChannel("g");
     setupDC();
 
-    log("📝 Creating offer...");
     const offer = await pc.createOffer();
-
-    log("📌 Setting local description...");
     await pc.setLocalDescription(offer);
 
-    log("📤 Offer created, waiting ICE...");
-  } catch (err) {
-    log("❌ Host error: " + err);
-  }
+  } catch(e){ log("❌ Host: "+e); }
 }
 
 async function join(){
-  try {
-    log("🤝 Join clicked");
-    setup();
-  } catch(err){
-    log("❌ Join error: " + err);
-  }
+  log("🤝 Join");
+  setup();
 }
 
 async function processSignal(){
@@ -185,28 +163,169 @@ async function processSignal(){
     const data = JSON.parse(input.value);
 
     if(data.type==="offer"){
-      log("📥 Got offer");
-
+      log("📥 Offer");
       await pc.setRemoteDescription(data);
 
-      log("📝 Creating answer...");
       const answer = await pc.createAnswer();
-
       await pc.setLocalDescription(answer);
-
-      log("📤 Answer ready (copy it)");
     } else {
-      log("📥 Got answer");
+      log("📥 Answer");
       await pc.setRemoteDescription(data);
     }
-  } catch(err){
-    log("❌ processSignal error: " + err);
-  }
+  } catch(e){ log("❌ Signal: "+e); }
 }
 
 function copyOut(){
   navigator.clipboard.writeText(out.value);
   log("📋 Copied");
+}
+
+// --- GAME ---
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+let W,H;
+let player={x:0};
+let opponent={x:0};
+let opponentTargetX=0;
+
+let ball={x:0,y:0,vx:0,vy:0,speed:300};
+let score={me:0,them:0};
+let paused=false;
+
+function resize(){
+  W=canvas.width=innerWidth;
+  H=canvas.height=innerHeight;
+}
+addEventListener("resize",resize);
+
+function startGame(){
+  document.getElementById("ui").style.display="none";
+  canvas.style.display="block";
+
+  resize();
+  player.x=W/2;
+  opponent.x=W/2;
+
+  if(isHost) resetBall();
+
+  requestAnimationFrame(loop);
+}
+
+// --- INPUT ---
+canvas.addEventListener("touchmove",e=>{
+  const x=e.touches[0].clientX;
+  player.x=x;
+  send({t:"p",x});
+});
+
+// --- NETWORK ---
+function send(d){
+  if(dc?.readyState==="open"){
+    dc.send(JSON.stringify(d));
+  }
+}
+
+function handle(d){
+  if(d.t==="p") opponentTargetX=d.x;
+  if(d.t==="b") ball=d.ball;
+  if(d.t==="s") score=d.score;
+  if(d.t==="r") resetBall();
+}
+
+// --- GAME LOGIC ---
+function resetBall(){
+  paused=true;
+
+  ball.x=W/2;
+  ball.y=H/2;
+  ball.speed=300;
+
+  const a=(Math.random()*Math.PI/3)-(Math.PI/6);
+  const dir=Math.random()>0.5?1:-1;
+
+  ball.vx=Math.sin(a);
+  ball.vy=Math.cos(a)*dir;
+
+  setTimeout(()=>paused=false,800);
+
+  send({t:"r"});
+}
+
+function update(dt){
+  opponent.x += (opponentTargetX - opponent.x) * 10 * dt;
+
+  if(!isHost || paused) return;
+
+  ball.x+=ball.vx*ball.speed*dt;
+  ball.y+=ball.vy*ball.speed*dt;
+
+  if(ball.x<0||ball.x>W) ball.vx*=-1;
+
+  if(ball.y>H-40 && Math.abs(ball.x-player.x)<60){
+    hit(player.x,-1);
+  }
+
+  if(ball.y<40 && Math.abs(ball.x-opponent.x)<60){
+    hit(opponent.x,1);
+  }
+
+  if(ball.y<0){
+    score.me++;
+    send({t:"s",score});
+    resetBall();
+  }
+
+  if(ball.y>H){
+    score.them++;
+    send({t:"s",score});
+    resetBall();
+  }
+
+  send({t:"b",ball});
+}
+
+function hit(px,dir){
+  const offset=(ball.x-px)/60;
+  const angle=offset*Math.PI/3;
+
+  ball.speed*=1.05;
+  ball.vx=Math.sin(angle);
+  ball.vy=Math.cos(angle)*dir;
+
+  if(navigator.vibrate) navigator.vibrate(10);
+}
+
+// --- DRAW ---
+function draw(){
+  ctx.fillStyle="black";
+  ctx.fillRect(0,0,W,H);
+
+  ctx.fillStyle="white";
+
+  ctx.fillRect(player.x-60,H-30,120,10);
+  ctx.fillRect(opponent.x-60,20,120,10);
+
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,8,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.textAlign="center";
+  ctx.font="20px monospace";
+  ctx.fillText(score.them,W/2,40);
+  ctx.fillText(score.me,W/2,H-10);
+}
+
+// --- LOOP ---
+let last=0;
+function loop(t){
+  const dt=(t-last)/1000;
+  last=t;
+
+  update(dt);
+  draw();
+
+  requestAnimationFrame(loop);
 }
 </script>
 
