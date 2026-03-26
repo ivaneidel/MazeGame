@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Optical Link Stable</title>
+<title>Optical Link PRO</title>
 
 <style>
 body {
@@ -13,7 +13,6 @@ body {
   font-family:monospace;
   text-align:center;
 }
-
 #ui { padding:10px; }
 
 #flash {
@@ -26,7 +25,7 @@ canvas { width:100%; }
 
 #bits, #log {
   font-size:10px;
-  max-height:120px;
+  max-height:140px;
   overflow:auto;
   background:#111;
   padding:5px;
@@ -56,8 +55,9 @@ const GRID = 6;
 const FRAME_BITS = GRID * GRID;
 const PREAMBLE = "10101010101010101010101010101010";
 
-// smoothing buffers
-let history = [];
+// calibration
+let RED_REF = [255,0,0];
+let BLUE_REF = [0,0,255];
 
 // ===== LOG =====
 const logEl = document.getElementById("log");
@@ -86,46 +86,72 @@ function buildPayload(str){
   return PREAMBLE + len + data;
 }
 
+// ===== DISTANCE =====
+function dist(a,b){
+  return Math.sqrt(
+    (a[0]-b[0])**2 +
+    (a[1]-b[1])**2 +
+    (a[2]-b[2])**2
+  );
+}
+
 // ===== SENDER =====
 async function startSender(){
   const msg = prompt("Message", "HELLO");
   if(!msg) return;
 
-  log("⏳ Waiting 3s...");
+  log("⏳ 3s...");
   await sleep(3000);
 
-  const bits = buildPayload(msg);
   const flash = document.getElementById("flash");
-  const progress = document.getElementById("progress");
-
   flash.style.display="grid";
   flash.style.gridTemplateColumns = `repeat(${GRID},1fr)`;
+
+  // --- CALIBRATION ---
+  log("🔴 Calibrating RED");
+  await fillColor("rgb(255,0,0)", 1000);
+
+  log("🔵 Calibrating BLUE");
+  await fillColor("rgb(0,0,255)", 1000);
+
+  const bits = buildPayload(msg);
 
   let i=0;
 
   while(i<bits.length){
+
+    // --- DATA FRAME ---
     const chunk = bits.slice(i,i+FRAME_BITS).padEnd(FRAME_BITS,"0");
 
     flash.innerHTML="";
-
     for(let b of chunk){
-      const div=document.createElement("div");
-
-      div.style.background = b==="1"
-        ? "rgb(255,0,0)"
-        : "rgb(0,0,255)";
-
-      flash.appendChild(div);
+      const d=document.createElement("div");
+      d.style.background = b==="1" ? "rgb(255,0,0)" : "rgb(0,0,255)";
+      flash.appendChild(d);
     }
 
-    i+=FRAME_BITS;
-    progress.innerText = `Sending ${Math.floor(i/bits.length*100)}%`;
+    await sleep(30);
 
+    // --- SYNC FRAME ---
+    flash.innerHTML="";
+    flash.style.background="white";
     await sleep(20);
+    flash.style.background="black";
+
+    i+=FRAME_BITS;
+    document.getElementById("progress").innerText =
+      `Sending ${Math.floor(i/bits.length*100)}%`;
   }
 
   flash.style.display="none";
   log("📤 Done");
+}
+
+async function fillColor(color, ms){
+  const flash = document.getElementById("flash");
+  flash.innerHTML="";
+  flash.style.background=color;
+  await sleep(ms);
 }
 
 // ===== RECEIVER =====
@@ -141,11 +167,12 @@ async function startReceiver(){
   const ctx = canvas.getContext("2d");
 
   const bitsEl = document.getElementById("bits");
-  const progress = document.getElementById("progress");
 
   let buffer="";
   let synced=false;
   let expectedLen=null;
+
+  let calibrating = 0;
 
   function loop(){
     if(video.videoWidth===0){
@@ -161,7 +188,8 @@ async function startReceiver(){
     const cellW = canvas.width/GRID;
     const cellH = canvas.height/GRID;
 
-    let frameBits = [];
+    let chunk="";
+    let debug="";
 
     for(let y=0;y<GRID;y++){
       for(let x=0;x<GRID;x++){
@@ -169,88 +197,96 @@ async function startReceiver(){
         const cx = Math.floor((x+0.5)*cellW);
         const cy = Math.floor((y+0.5)*cellH);
 
-        const size = 6; // small center sample
-        const img = ctx.getImageData(cx-size/2, cy-size/2, size, size);
+        const px = ctx.getImageData(cx,cy,1,1).data;
+        const color = [px[0],px[1],px[2]];
 
-        let r=0,b=0,count=0;
+        // --- CALIBRATION ---
+        if(calibrating===1) RED_REF = color;
+        if(calibrating===2) BLUE_REF = color;
 
-        for(let i=0;i<img.data.length;i+=4){
-          r+=img.data[i];
-          b+=img.data[i+2];
-          count++;
+        const dRed = dist(color, RED_REF);
+        const dBlue = dist(color, BLUE_REF);
+
+        let bit = dRed < dBlue ? "1" : "0";
+
+        const confidence = Math.abs(dRed - dBlue);
+
+        if(confidence < 30){
+          bit = "?";
         }
 
-        r/=count;
-        b/=count;
+        chunk += bit==="?" ? "0" : bit;
 
-        // 🔥 CONFIDENCE THRESHOLD
-        let bit;
-        if(Math.abs(r-b) < 30){
-          bit = null; // uncertain
-        } else {
-          bit = r > b ? 1 : 0;
-        }
-
-        frameBits.push(bit);
+        debug += `R:${Math.floor(dRed)} B:${Math.floor(dBlue)} -> ${bit}\n`;
 
         ctx.strokeStyle="white";
         ctx.strokeRect(x*cellW,y*cellH,cellW,cellH);
+
+        ctx.fillStyle="white";
+        ctx.fillText(bit,cx-4,cy+4);
       }
     }
 
-    // --- TEMPORAL SMOOTHING ---
-    history.push(frameBits);
-    if(history.length > 3) history.shift();
+    // calibration steps
+    if(calibrating===0){
+      log("🔴 Capture RED");
+      calibrating=1;
+      setTimeout(()=>calibrating=2,1000);
+      setTimeout(()=>{
+        log("🔵 Capture BLUE");
+        calibrating=2;
+      },1000);
+      setTimeout(()=>{
+        log("✅ Calibrated");
+        calibrating=3;
+      },2000);
+    }
 
-    let chunk="";
-    for(let i=0;i<FRAME_BITS;i++){
-      let ones=0, zeros=0;
+    if(calibrating===3){
 
-      for(let h of history){
-        if(h[i]===1) ones++;
-        if(h[i]===0) zeros++;
+      // sync detection (white flash)
+      const avgLum = getAvgLum(ctx,canvas);
+
+      if(avgLum > 200){
+        synced=true;
+        return requestAnimationFrame(loop);
       }
 
-      chunk += ones > zeros ? "1" : "0";
-    }
+      if(synced){
+        buffer += chunk;
 
-    buffer += chunk;
+        if(!expectedLen && buffer.length>=32){
+          expectedLen = parseInt(buffer.slice(0,32),2);
+          buffer = buffer.slice(32);
+          log("📏 "+expectedLen);
+        }
 
-    // SYNC
-    if(!synced && buffer.includes(PREAMBLE)){
-      log("📡 Sync");
-      buffer = buffer.split(PREAMBLE)[1];
-      synced=true;
-    }
+        if(expectedLen && buffer.length>=expectedLen){
+          const msg = bitsToStr(buffer.slice(0,expectedLen));
+          log("📥 "+msg);
 
-    // LENGTH
-    if(synced && expectedLen===null && buffer.length>=32){
-      expectedLen = parseInt(buffer.slice(0,32),2);
-      buffer = buffer.slice(32);
-      log("📏 Bits: "+expectedLen);
-    }
-
-    if(expectedLen){
-      progress.innerText =
-        `Receiving ${Math.floor(buffer.length/expectedLen*100)}%`;
-
-      if(buffer.length >= expectedLen){
-        const msg = bitsToStr(buffer.slice(0,expectedLen));
-        log("📥 "+msg);
-
-        stream.getTracks().forEach(t=>t.stop());
-        return;
+          stream.getTracks().forEach(t=>t.stop());
+          return;
+        }
       }
     }
 
     bitsEl.innerText =
-      "FRAME:\n"+chunk+
-      "\n\nBUFFER:\n"+buffer.slice(-200);
+      "FRAME:\n"+chunk+"\n\nDEBUG:\n"+debug.slice(0,500);
 
     requestAnimationFrame(loop);
   }
 
   loop();
+}
+
+function getAvgLum(ctx,canvas){
+  const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+  let sum=0;
+  for(let i=0;i<img.data.length;i+=4){
+    sum += (img.data[i]+img.data[i+1]+img.data[i+2])/3;
+  }
+  return sum / (img.data.length/4);
 }
 
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
