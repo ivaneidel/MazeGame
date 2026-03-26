@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sound Link Robust</title>
+<title>Sound Link LOCKED</title>
 
 <style>
 body {
@@ -14,7 +14,6 @@ body {
   text-align:center;
 }
 #ui { padding:15px; }
-
 #log, #bits {
   font-size:11px;
   max-height:160px;
@@ -38,7 +37,8 @@ body {
 
 <script>
 // ===== CONFIG =====
-const SYMBOL_TIME = 60;
+const SYMBOL_TIME = 90; // 🔥 stable
+const SAMPLE_OFFSET = 45; // middle of symbol
 
 const FREQS = {
   "00": 900,
@@ -88,7 +88,7 @@ async function startSender(){
 
   // START
   osc.frequency.value = START_FREQ;
-  await sleep(500);
+  await sleep(600);
 
   const bits = strToBits(msg);
 
@@ -100,7 +100,7 @@ async function startSender(){
 
   // END
   osc.frequency.value = END_FREQ;
-  await sleep(500);
+  await sleep(600);
 
   osc.stop();
   log("📤 Done");
@@ -119,15 +119,14 @@ async function startReceiver(){
 
   const data = new Uint8Array(analyser.frequencyBinCount);
 
-  let receiving = false;
   let bits = "";
 
   log("🎧 Listening...");
 
   function getFreq(){
     analyser.getByteFrequencyData(data);
-    let max=0,iMax=0;
 
+    let max=0,iMax=0;
     for(let i=0;i<data.length;i++){
       if(data[i]>max){
         max=data[i];
@@ -138,73 +137,63 @@ async function startReceiver(){
     return iMax * ctx.sampleRate / (data.length*2);
   }
 
-  async function readSymbol(){
-    let samples = [];
-
-    for(let i=0;i<5;i++){
-      samples.push(getFreq());
-      await sleep(10);
+  // ===== WAIT FOR START =====
+  while(true){
+    const f = getFreq();
+    if(Math.abs(f - START_FREQ) < 150){
+      log("🚀 START LOCKED");
+      break;
     }
-
-    // average
-    const avg = samples.reduce((a,b)=>a+b,0)/samples.length;
-
-    return avg;
+    await sleep(20);
   }
 
-  async function loop(){
-    while(true){
+  // 🔥 settle
+  await sleep(300);
 
-      const freq = await readSymbol();
+  // ===== MAIN LOOP =====
+  while(true){
 
-      // START
-      if(!receiving && Math.abs(freq - START_FREQ) < 200){
-        log("🚀 START");
-        receiving = true;
-        bits = "";
-        continue;
+    // sample at center of symbol
+    await sleep(SAMPLE_OFFSET);
+
+    const freq = getFreq();
+
+    // END
+    if(Math.abs(freq - END_FREQ) < 150){
+      log("🏁 END");
+      break;
+    }
+
+    // decode
+    let best=null, min=9999;
+
+    for(let k in FREQS){
+      const d = Math.abs(freq - FREQS[k]);
+      if(d < min){
+        min = d;
+        best = k;
       }
+    }
 
-      // END
-      if(receiving && Math.abs(freq - END_FREQ) < 200){
-        log("🏁 END");
+    bits += best;
 
-        const msg = bitsToStr(bits);
-        log("📥 " + msg);
-
-        stream.getTracks().forEach(t=>t.stop());
-        return;
-      }
-
-      if(!receiving) continue;
-
-      // decode symbol
-      let best=null, minDiff=9999;
-
-      for(let k in FREQS){
-        const diff = Math.abs(freq - FREQS[k]);
-        if(diff < minDiff){
-          minDiff = diff;
-          best = k;
-        }
-      }
-
-      if(best){
-        bits += best;
-      }
-
-      document.getElementById("bits").innerText =
+    document.getElementById("bits").innerText =
 `Freq: ${Math.floor(freq)} Hz
 
 Bits:
-${bits.slice(-200)}
+${bits}
 
 Decoded:
 ${bitsToStr(bits)}`;
-    }
+
+    // wait remainder of symbol
+    await sleep(SYMBOL_TIME - SAMPLE_OFFSET);
   }
 
-  loop();
+  const msg = bitsToStr(bits);
+  log("📥 " + msg);
+
+  stream.getTracks().forEach(t=>t.stop());
 }
 
 function sleep(ms){
