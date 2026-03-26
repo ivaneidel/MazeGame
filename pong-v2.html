@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Pong P2P</title>
+<title>Pong P2P QR</title>
 
 <style>
 body {
@@ -16,15 +16,7 @@ body {
 }
 #ui { padding:15px; }
 canvas { display:none; }
-
-textarea {
-  width:100%;
-  height:90px;
-  background:#111;
-  color:white;
-  border:1px solid #333;
-  margin-top:5px;
-}
+video { width:100%; display:none; }
 
 button {
   width:100%;
@@ -45,97 +37,72 @@ button {
   background:#000;
   font-size:11px;
   border-top:1px solid #333;
-  display:none;
 }
 </style>
 </head>
 <body>
 
 <div id="ui">
-  <button onclick="host()">Host Game</button>
-  <button onclick="join()">Join Game</button>
+  <button onclick="host()">Host</button>
+  <button onclick="join()">Join</button>
   <button onclick="toggleLog()">Toggle Debug</button>
 
-  <p>📤 Send this:</p>
-  <textarea id="out"></textarea>
-  <button onclick="copyOut()">Copy</button>
-
-  <p>📥 Paste received:</p>
-  <textarea id="in"></textarea>
-  <button onclick="processSignal()">Process</button>
+  <div id="qr"></div>
+  <video id="cam" autoplay></video>
 </div>
 
 <canvas id="game"></canvas>
 <div id="log"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+
 <script>
 // --- LOG ---
 const logEl = document.getElementById("log");
-
 function log(msg){
-  const time = new Date().toLocaleTimeString();
-  logEl.innerHTML += `[${time}] ${msg}<br>`;
+  const t=new Date().toLocaleTimeString();
+  logEl.innerHTML += `[${t}] ${msg}<br>`;
   logEl.scrollTop = logEl.scrollHeight;
 }
-
 function toggleLog(){
-  logEl.style.display = logEl.style.display === "none" ? "block" : "none";
+  logEl.style.display = logEl.style.display==="none"?"block":"none";
 }
-
-// --- ERROR CAPTURE ---
-window.onerror = (m,s,l,c)=>log(`❌ JS Error: ${m} @${l}:${c}`);
-window.onunhandledrejection = e=>log(`❌ Promise: ${e.reason}`);
-
-// --- DOM ---
-const out = document.getElementById("out");
-const input = document.getElementById("in");
 
 // --- WEBRTC ---
 let pc, dc, isHost=false;
 
 function setup(){
-  log("🟡 Creating PeerConnection");
-
   pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" }
-    ]
+    iceServers:[{urls:"stun:stun.l.google.com:19302"}]
   });
 
   pc.onicecandidate = e=>{
-    if(e.candidate){
-      log("🧊 ICE candidate");
-    } else {
-      log("✅ ICE gathering end");
+    if(!e.candidate){
+      if(isHost){
+        showQR(JSON.stringify(pc.localDescription));
+      }
     }
-
-    // 🔥 ALWAYS update signal
-    out.value = JSON.stringify(pc.localDescription);
-  };
-
-  pc.onicegatheringstatechange = ()=>{
-    log("📡 ICE gathering: " + pc.iceGatheringState);
-  };
-
-  pc.oniceconnectionstatechange = ()=>{
-    log("🧊 ICE: " + pc.iceConnectionState);
   };
 
   pc.onconnectionstatechange = ()=>{
-    log("🔗 Conn: " + pc.connectionState);
+    log("Conn: "+pc.connectionState);
+  };
+
+  pc.oniceconnectionstatechange = ()=>{
+    log("ICE: "+pc.iceConnectionState);
   };
 
   pc.ondatachannel = e=>{
-    log("📡 Data channel received");
-    dc = e.channel;
+    dc=e.channel;
     setupDC();
   };
 }
 
 function setupDC(){
   dc.onopen = ()=>{
-    log("🟢 Data channel open");
-    startGame();
+    log("🟢 Data open");
+    startGame(); // 🔥 FORCE START BOTH SIDES
   };
 
   dc.onmessage = e=>{
@@ -143,57 +110,71 @@ function setupDC(){
   };
 }
 
-// --- SIGNALING ---
+// --- HOST ---
 async function host(){
-  try {
-    log("🚀 Host");
-
-    isHost=true;
-    setup();
-
-    dc = pc.createDataChannel("g");
-    setupDC();
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // 🔥 SHOW IMMEDIATELY
-    out.value = JSON.stringify(pc.localDescription);
-    log("📤 Offer ready (early)");
-
-  } catch(e){ log("❌ Host: "+e); }
-}
-
-async function join(){
-  log("🤝 Join");
+  isHost=true;
   setup();
+
+  dc = pc.createDataChannel("g");
+  setupDC();
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
 }
 
-async function processSignal(){
-  try {
-    const data = JSON.parse(input.value);
+// --- JOIN ---
+async function join(){
+  setup();
+  startCamera();
+}
 
-    if(data.type==="offer"){
-      log("📥 Offer");
-      await pc.setRemoteDescription(data);
+// --- QR ---
+function showQR(data){
+  document.getElementById("qr").innerHTML="";
+  new QRCode(document.getElementById("qr"), data);
+}
 
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+// --- CAMERA SCAN ---
+async function startCamera(){
+  const video=document.getElementById("cam");
+  video.style.display="block";
 
-      // 🔥 SHOW ANSWER IMMEDIATELY
-      out.value = JSON.stringify(pc.localDescription);
-      log("📤 Answer ready");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:"environment"}
+  });
 
-    } else {
-      log("📥 Answer");
-      await pc.setRemoteDescription(data);
+  video.srcObject=stream;
+
+  const canvas=document.createElement("canvas");
+  const ctx=canvas.getContext("2d");
+
+  const scan = setInterval(()=>{
+    canvas.width=video.videoWidth;
+    canvas.height=video.videoHeight;
+    ctx.drawImage(video,0,0);
+
+    const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const code=jsQR(img.data,canvas.width,canvas.height);
+
+    if(code){
+      clearInterval(scan);
+      video.srcObject.getTracks().forEach(t=>t.stop());
+      video.style.display="none";
+      connect(code.data);
     }
-  } catch(e){ log("❌ Signal: "+e); }
+  },300);
 }
 
-function copyOut(){
-  navigator.clipboard.writeText(out.value);
-  log("📋 Copied");
+// --- CONNECT ---
+async function connect(data){
+  const offer=JSON.parse(data);
+  await pc.setRemoteDescription(offer);
+
+  const answer=await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  // send answer back via QR
+  showQR(JSON.stringify(pc.localDescription));
 }
 
 // --- GAME ---
@@ -203,11 +184,9 @@ const ctx=canvas.getContext("2d");
 let W,H;
 let player={x:0};
 let opponent={x:0};
-let opponentTargetX=0;
+let targetX=0;
 
 let ball={x:0,y:0,vx:0,vy:0,speed:300};
-let score={me:0,them:0};
-let paused=false;
 
 function resize(){
   W=canvas.width=innerWidth;
@@ -243,35 +222,26 @@ function send(d){
 }
 
 function handle(d){
-  if(d.t==="p") opponentTargetX=d.x;
+  if(d.t==="p") targetX=d.x;
   if(d.t==="b") ball=d.ball;
-  if(d.t==="s") score=d.score;
-  if(d.t==="r") resetBall();
 }
 
-// --- GAME LOGIC ---
+// --- GAME ---
 function resetBall(){
-  paused=true;
-
   ball.x=W/2;
   ball.y=H/2;
-  ball.speed=300;
 
   const a=(Math.random()*Math.PI/3)-(Math.PI/6);
   const dir=Math.random()>0.5?1:-1;
 
   ball.vx=Math.sin(a);
   ball.vy=Math.cos(a)*dir;
-
-  setTimeout(()=>paused=false,800);
-
-  send({t:"r"});
 }
 
 function update(dt){
-  opponent.x += (opponentTargetX - opponent.x) * 10 * dt;
+  opponent.x += (targetX - opponent.x)*10*dt;
 
-  if(!isHost || paused) return;
+  if(!isHost) return;
 
   ball.x+=ball.vx*ball.speed*dt;
   ball.y+=ball.vy*ball.speed*dt;
@@ -279,37 +249,14 @@ function update(dt){
   if(ball.x<0||ball.x>W) ball.vx*=-1;
 
   if(ball.y>H-40 && Math.abs(ball.x-player.x)<60){
-    hit(player.x,-1);
+    ball.vy*=-1;
   }
 
   if(ball.y<40 && Math.abs(ball.x-opponent.x)<60){
-    hit(opponent.x,1);
-  }
-
-  if(ball.y<0){
-    score.me++;
-    send({t:"s",score});
-    resetBall();
-  }
-
-  if(ball.y>H){
-    score.them++;
-    send({t:"s",score});
-    resetBall();
+    ball.vy*=-1;
   }
 
   send({t:"b",ball});
-}
-
-function hit(px,dir){
-  const offset=(ball.x-px)/60;
-  const angle=offset*Math.PI/3;
-
-  ball.speed*=1.05;
-  ball.vx=Math.sin(angle);
-  ball.vy=Math.cos(angle)*dir;
-
-  if(navigator.vibrate) navigator.vibrate(10);
 }
 
 // --- DRAW ---
@@ -325,11 +272,6 @@ function draw(){
   ctx.beginPath();
   ctx.arc(ball.x,ball.y,8,0,Math.PI*2);
   ctx.fill();
-
-  ctx.textAlign="center";
-  ctx.font="20px monospace";
-  ctx.fillText(score.them,W/2,40);
-  ctx.fillText(score.me,W/2,H-10);
 }
 
 // --- LOOP ---
