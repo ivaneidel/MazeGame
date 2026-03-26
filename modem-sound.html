@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound Link FAST</title>
+
+<style>
+body {
+  margin:0;
+  background:black;
+  color:white;
+  font-family:monospace;
+  text-align:center;
+}
+#ui { padding:15px; }
+
+#log, #bits {
+  font-size:11px;
+  max-height:150px;
+  overflow:auto;
+  background:#111;
+  padding:10px;
+  margin-top:10px;
+  white-space:pre-wrap;
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <button onclick="startSender()">Sender</button>
+  <button onclick="startReceiver()">Receiver</button>
+  <div id="progress"></div>
+</div>
+
+<div id="bits"></div>
+<div id="log"></div>
+
+<script>
+// ===== CONFIG =====
+const BASE = 800;      // Hz
+const STEP = 120;      // Hz spacing
+const SYMBOL_BITS = 4; // 4 bits per tone
+const SYMBOL_TIME = 40; // ms
+
+const PREAMBLE = "10101010101010101010101010101010";
+
+// ===== LOG =====
+const logEl = document.getElementById("log");
+function log(m){
+  logEl.innerHTML += m + "<br>";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ===== UTILS =====
+function strToBits(str){
+  return str.split("").map(c =>
+    c.charCodeAt(0).toString(2).padStart(8,"0")
+  ).join("");
+}
+
+function bitsToStr(bits){
+  let out="";
+  for(let i=0;i<bits.length;i+=8){
+    out+=String.fromCharCode(parseInt(bits.slice(i,i+8),2));
+  }
+  return out;
+}
+
+function buildPayload(str){
+  const data = strToBits(str);
+  const len = data.length.toString(2).padStart(32,"0");
+  return PREAMBLE + len + data;
+}
+
+// ===== SENDER =====
+async function startSender(){
+  const msg = prompt("Message", "HELLO");
+  if(!msg) return;
+
+  log("⏳ 3s...");
+  await sleep(3000);
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const bits = buildPayload(msg);
+
+  const progress = document.getElementById("progress");
+
+  for(let i=0;i<bits.length;i+=SYMBOL_BITS){
+    const chunk = bits.slice(i,i+SYMBOL_BITS).padEnd(SYMBOL_BITS,"0");
+    const value = parseInt(chunk,2);
+
+    const freq = BASE + value * STEP;
+
+    const osc = audioCtx.createOscillator();
+    osc.type="sine";
+    osc.frequency.value = freq;
+
+    osc.connect(audioCtx.destination);
+    osc.start();
+
+    await sleep(SYMBOL_TIME);
+
+    osc.stop();
+
+    progress.innerText =
+      `Sending ${Math.floor(i/bits.length*100)}%`;
+  }
+
+  log("📤 Done");
+}
+
+// ===== RECEIVER =====
+async function startReceiver(){
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(stream);
+
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+
+  source.connect(analyser);
+
+  const data = new Uint8Array(analyser.frequencyBinCount);
+
+  let buffer="";
+  let synced=false;
+  let expectedLen=null;
+
+  function loop(){
+    analyser.getByteFrequencyData(data);
+
+    const freq = detectFreq(data, audioCtx.sampleRate);
+
+    const value = Math.round((freq - BASE) / STEP);
+
+    if(value >=0 && value < 16){
+      const bits = value.toString(2).padStart(4,"0");
+      buffer += bits;
+    }
+
+    // SYNC
+    if(!synced && buffer.includes(PREAMBLE)){
+      log("📡 Sync");
+      buffer = buffer.split(PREAMBLE)[1];
+      synced=true;
+    }
+
+    // LENGTH
+    if(synced && !expectedLen && buffer.length>=32){
+      expectedLen = parseInt(buffer.slice(0,32),2);
+      buffer = buffer.slice(32);
+      log("📏 "+expectedLen);
+    }
+
+    if(expectedLen && buffer.length>=expectedLen){
+      const msg = bitsToStr(buffer.slice(0,expectedLen));
+      log("📥 "+msg);
+
+      stream.getTracks().forEach(t=>t.stop());
+      return;
+    }
+
+    document.getElementById("bits").innerText =
+      `Freq: ${Math.floor(freq)} Hz\nValue: ${value}\n\nBuffer:\n${buffer.slice(-200)}`;
+
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+}
+
+// ===== FREQ DETECTION =====
+function detectFreq(data, sampleRate){
+  let maxVal=0, index=0;
+
+  for(let i=0;i<data.length;i++){
+    if(data[i]>maxVal){
+      maxVal=data[i];
+      index=i;
+    }
+  }
+
+  return index * sampleRate / (data.length*2);
+}
+
+function sleep(ms){
+  return new Promise(r=>setTimeout(r,ms));
+}
+</script>
+
+</body>
+</html>
