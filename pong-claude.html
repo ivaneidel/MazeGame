@@ -163,50 +163,84 @@ const RTC_CFG = { iceServers: [
   { urls: "stun:stun.stunprotocol.org:3478" },
 ]};
 let pc = null, dc = null, role = null;
+// Keep last known payloads so we can re-offer/re-answer after iOS wakes up
+let lastOfferPayload = null, lastAnswerPayload = null;
 
 function createPC() {
   log("createPC");
+  if (pc) { try { pc.close(); } catch(e){} }
   pc = new RTCPeerConnection(RTC_CFG);
-  pc.onicecandidate = e => {
-    if (e.candidate) log("cand: "+e.candidate.type+" "+e.candidate.protocol);
-    else log("ICE candidates exhausted (null candidate)");
-  };
   pc.onicegatheringstatechange = () => log("iceGather: "+pc.iceGatheringState);
   pc.oniceconnectionstatechange = () => {
-    log("iceCon: "+pc.iceConnectionState);
-    if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed")
-      log("CONNECTED!", "ok");
+    const s = pc.iceConnectionState;
+    log("iceCon: "+s, s==="connected"||s==="completed" ? "ok" : "info");
+    if (s==="connected"||s==="completed") log("CONNECTED!", "ok");
+    if ((s==="failed"||s==="disconnected") && gameRunning) {
+      log("connection lost — attempting ICE restart","err");
+      if (role==="host") hostICERestart();
+    }
   };
   return pc;
 }
 
-// Wait for ICE — resolves as soon as we have at least one srflx candidate OR gathering completes
+// Wait for ICE — resolves on first srflx, null candidate, or timeout
 function waitICE(pc) {
   return new Promise(res => {
     let done = false;
     const finish = (reason) => {
       if (done) return; done = true;
-      log("ICE wait done: "+reason, "ok");
+      log("ICE done: "+reason, "ok");
       res();
     };
-    // Resolve immediately on null candidate (gathering complete)
     pc.onicecandidate = e => {
       if (e.candidate) {
         log("cand: "+e.candidate.type+" "+e.candidate.protocol);
-        // Resolve as soon as we have a srflx — don't wait for more
         if (e.candidate.type === "srflx") finish("got srflx");
       } else {
-        finish("null candidate (gathering done)");
+        finish("gathering complete");
       }
     };
     pc.onicegatheringstatechange = () => {
-      log("iceGather: "+pc.iceGatheringState);
       if (pc.iceGatheringState === "complete") finish("gatheringState=complete");
     };
-    // Hard timeout — 12s to give STUN servers time on slow mobile connections
     setTimeout(() => finish("timeout 12s"), 12000);
   });
 }
+
+// ICE restart (host-side): re-offer with iceRestart:true, share new payload
+async function hostICERestart() {
+  try {
+    log("ICE restart…");
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    await waitICE(pc);
+    lastOfferPayload = packSDP(pc.localDescription);
+    log("new offer ready after restart, len="+lastOfferPayload.length,"ok");
+    // Update the UI so user can re-share
+    const offerURL = location.href.split("#")[0] + "#o" + lastOfferPayload;
+    setEl("st-host","Connection dropped. Re-share your link:");
+    document.getElementById("btn-share").onclick = () => navigator.share ? navigator.share({title:"Join my Pong game", url:offerURL}) : shareCode(offerURL,"Offer");
+    document.getElementById("btn-copy").onclick  = async () => { await copyCode(offerURL); alert("Link copied!"); };
+    document.getElementById("host-share-btns").style.display = "flex";
+    document.getElementById("host-answer-area").style.display = "flex";
+  } catch(e) { log("ICE restart err: "+e.message,"err"); }
+}
+
+// Restore PC after iOS wakeup — if ICE is dead, restart
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  log("page visible again");
+  if (!pc) return;
+  const s = pc.iceConnectionState;
+  log("iceConnectionState on wake: "+s);
+  if (s === "failed" || s === "disconnected" || s === "closed") {
+    log("ICE dead after wake, restarting…","err");
+    if (role === "host") hostICERestart();
+    else if (role === "guest" && lastAnswerPayload) {
+      setEl("st-join","Connection dropped. Host needs to re-share their offer.");
+    }
+  }
+});
 
 // ── HOST ──────────────────────────────────────────────────────────────────────
 async function startHost() {
@@ -224,12 +258,14 @@ async function startHost() {
   await waitICE(pc);
 
   const payload = packSDP(pc.localDescription);
+  lastOfferPayload = payload;
   log("offer ready, len="+payload.length);
 
-  setEl("host-hint","Share your offer code with the guest:");
+  const offerURL = location.href.split("#")[0] + "#o" + payload;
+  setEl("host-hint","Share this link with the guest:");
   document.getElementById("host-share-btns").style.display = "flex";
-  document.getElementById("btn-share").onclick = () => shareCode(payload, "Offer");
-  document.getElementById("btn-copy").onclick  = async () => { await copyCode(payload); alert("Copied!"); };
+  document.getElementById("btn-share").onclick = () => navigator.share ? navigator.share({title:"Join my Pong game", url:offerURL}) : shareCode(offerURL,"Offer");
+  document.getElementById("btn-copy").onclick  = async () => { await copyCode(offerURL); alert("Link copied!"); };
 
   setEl("st-host","Waiting for guest reply…");
   document.getElementById("host-answer-area").style.display = "flex";
@@ -271,6 +307,7 @@ async function processOffer(raw) {
     await waitICE(pc);
 
     const answerPayload = packSDP(pc.localDescription);
+    lastAnswerPayload = answerPayload;
     log("answer ready, len="+answerPayload.length);
 
     setEl("join-hint","Send this reply code to the host:");
