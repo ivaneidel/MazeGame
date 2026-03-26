@@ -5,57 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Pong WebRTC</title>
 <style>
-  html, body { margin:0; padding:0; background:#000; overflow:hidden; touch-action:none; font-family:monospace; color:#fff; }
-  canvas { display:block; }
-  #ui {
-    position:fixed; inset:0; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; gap:14px;
-    background:rgba(0,0,0,0.96); overflow-y:auto; padding:20px; box-sizing:border-box;
+  html,body{margin:0;padding:0;background:#000;overflow:hidden;touch-action:none;font-family:monospace;color:#fff;}
+  canvas{display:block;}
+  #ui{
+    position:fixed;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;
+    background:rgba(0,0,0,0.96);overflow-y:auto;padding:20px;box-sizing:border-box;
   }
-  #ui h1 { margin:0; font-size:clamp(20px,5vw,32px); letter-spacing:4px; }
-  p.hint { margin:0; font-size:13px; opacity:0.65; text-align:center; max-width:320px; }
-  button {
-    background:#fff; color:#000; border:none; padding:12px 28px;
-    font-family:monospace; font-size:15px; cursor:pointer; letter-spacing:2px;
-  }
-  button:active { background:#aaa; }
-  .btn-row { display:flex; gap:12px; }
-  .status { font-size:12px; opacity:0.75; text-align:center; min-height:18px; }
-  .qr-box { background:#fff; padding:24px; border-radius:4px; }
-  #scan-video { width:260px; height:260px; object-fit:cover; border:2px solid #fff; display:block; border-radius:2px; }
-  #scan-region { width:260px; height:260px; position:relative; }
-  #scan-region video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:2px; }
-  /* corner brackets overlay */
-  #scan-region::before {
-    content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
-    border:3px solid transparent;
-    box-shadow: inset 0 0 0 0 #fff;
-    outline: 2px solid #fff;
-    border-radius:2px;
-  }
-
-  /* ── Debug log ── */
-  #log-wrap {
-    position:fixed; bottom:0; left:0; right:0;
-    max-height:35vh; overflow-y:auto;
-    background:rgba(0,0,0,0.9); border-top:1px solid #333;
-    font-size:11px; padding:4px 6px; box-sizing:border-box;
-    z-index:9999;
-  }
-  #log-wrap .e { border-bottom:1px solid #1a1a1a; padding:2px 0; word-break:break-all; }
-  #log-wrap .err { color:#f66; }
-  #log-wrap .ok  { color:#6f6; }
-  #log-wrap .info{ color:#adf; }
-  #log-btn {
-    position:fixed; bottom:4px; right:4px; z-index:10000;
-    background:#333; color:#fff; border:none; font-size:11px;
-    padding:4px 8px; cursor:pointer; opacity:0.8;
-  }
+  h1{margin:0;font-size:clamp(20px,5vw,32px);letter-spacing:4px;}
+  .hint{margin:0;font-size:13px;opacity:0.65;text-align:center;max-width:320px;}
+  button{background:#fff;color:#000;border:none;padding:12px 28px;font-family:monospace;font-size:15px;cursor:pointer;letter-spacing:2px;}
+  button:active{background:#aaa;}
+  button.sec{background:#333;color:#fff;font-size:13px;padding:10px 20px;}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;}
+  .status{font-size:12px;opacity:0.75;text-align:center;min-height:18px;}
+  .qr-box{background:#fff;padding:24px;border-radius:4px;}
+  textarea{background:#111;color:#0f0;border:1px solid #444;font-family:monospace;font-size:11px;
+    width:280px;height:72px;resize:none;padding:6px;box-sizing:border-box;}
+  input.code-in{background:#111;color:#fff;border:1px solid #555;font-family:monospace;
+    font-size:13px;width:280px;padding:8px;box-sizing:border-box;text-align:center;}
+  .divider{width:280px;text-align:center;font-size:11px;opacity:0.4;margin:2px 0;}
+  /* scan */
+  #scan-wrap{position:relative;width:260px;height:260px;}
+  #scan-wrap video{width:100%;height:100%;object-fit:cover;border:2px solid #fff;display:block;}
+  /* log */
+  #log-wrap{position:fixed;bottom:0;left:0;right:0;max-height:30vh;overflow-y:auto;
+    background:rgba(0,0,0,0.9);border-top:1px solid #333;font-size:10px;padding:4px 6px;
+    box-sizing:border-box;z-index:9999;}
+  #log-wrap .e{border-bottom:1px solid #1a1a1a;padding:1px 0;word-break:break-all;}
+  .err{color:#f66;}.ok{color:#6f6;}.info{color:#adf;}
+  #log-btn{position:fixed;bottom:4px;right:4px;z-index:10000;background:#333;color:#fff;
+    border:none;font-size:10px;padding:3px 7px;cursor:pointer;opacity:0.8;}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-
 <div id="ui">
   <h1>PONG</h1>
 
@@ -67,387 +51,379 @@
     </div>
   </div>
 
-  <!-- HOST -->
-  <div id="s-host" style="display:none;flex-direction:column;align-items:center;gap:12px;">
+  <!-- HOST: show offer, wait for answer -->
+  <div id="s-host" style="display:none;flex-direction:column;align-items:center;gap:10px;">
     <p class="hint" id="host-hint">Generating offer…</p>
-    <div class="qr-box" id="host-qr-box"><canvas id="qr-host" width="260" height="260"></canvas></div>
-    <div id="st-host" class="status">Please wait…</div>
-    <button id="btn-scan-guest" style="display:none;">SCAN GUEST QR</button>
-    <!-- host's scanner goes here dynamically -->
-    <div id="host-scan-area"></div>
+
+    <!-- QR (shown always, works on iOS) -->
+    <div class="qr-box" id="host-qr-wrap" style="display:none;">
+      <canvas id="qr-host" width="240" height="240"></canvas>
+    </div>
+
+    <!-- Share / copy button -->
+    <div class="btn-row" id="host-share-btns" style="display:none;">
+      <button id="btn-share">SHARE LINK</button>
+      <button class="sec" id="btn-copy">COPY</button>
+    </div>
+
+    <div class="divider" id="host-divider" style="display:none;">── or scan if on iOS ──</div>
+
+    <div id="st-host" class="status"></div>
+
+    <!-- After sharing: host needs to receive the answer -->
+    <div id="host-answer-area" style="display:none;flex-direction:column;align-items:center;gap:8px;width:100%;">
+      <p class="hint">Paste the guest's reply code, or scan their QR:</p>
+      <textarea id="ta-answer" placeholder="Paste guest answer code here…"></textarea>
+      <button id="btn-paste-answer">SUBMIT ANSWER</button>
+      <div class="divider">── or ──</div>
+      <button class="sec" id="btn-scan-answer">SCAN GUEST QR</button>
+      <div id="host-scan-area"></div>
+    </div>
   </div>
 
-  <!-- JOIN -->
-  <div id="s-join" style="display:none;flex-direction:column;align-items:center;gap:12px;">
-    <p class="hint" id="join-hint">Scan the host's QR code</p>
-    <div id="scan-region"><video id="scan-video" autoplay playsinline muted></video></div>
-    <div id="st-join" class="status">Starting camera…</div>
-    <!-- answer QR shown after scanning -->
-    <div class="qr-box" id="answer-qr-box" style="display:none;"><canvas id="qr-answer" width="260" height="260"></canvas></div>
+  <!-- JOIN: receive offer link / paste, send answer -->
+  <div id="s-join" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+    <p class="hint" id="join-hint">Tap the host's link, or paste the code below:</p>
+    <textarea id="ta-offer" placeholder="Paste host offer code here…"></textarea>
+    <button id="btn-submit-offer">CONNECT</button>
+    <div class="divider">── or scan host QR if on iOS ──</div>
+    <button class="sec" id="btn-scan-offer">SCAN HOST QR</button>
+    <div id="join-scan-area"></div>
+    <div id="st-join" class="status"></div>
+
+    <!-- answer QR + copy -->
+    <div id="join-answer-area" style="display:none;flex-direction:column;align-items:center;gap:8px;">
+      <p class="hint">Send this to the host (share, copy, or they scan):</p>
+      <div class="qr-box" id="answer-qr-wrap" style="display:none;"><canvas id="qr-answer" width="240" height="240"></canvas></div>
+      <div class="btn-row">
+        <button id="btn-share-answer">SHARE REPLY</button>
+        <button class="sec" id="btn-copy-answer">COPY</button>
+      </div>
+    </div>
   </div>
 </div>
 
 <div id="log-wrap"></div>
-<button id="log-btn" onclick="toggleLog()">LOG ▲</button>
+<button id="log-btn" onclick="toggleLog()">LOG</button>
 
-<!-- QR generator (classic, reliable) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
 <script type="module">
-// ─── nimiq qr-scanner (ES module) ────────────────────────────────────────────
-// Worker path must be set before import
-const QR_SCANNER_CDN = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js';
-const QR_WORKER_CDN  = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js';
-
+// ── nimiq qr-scanner ──────────────────────────────────────────────────────────
+const QS_JS  = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js';
+const QS_W   = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js';
 let QrScanner = null;
-async function loadQrScanner() {
+async function getQrScanner() {
   if (QrScanner) return QrScanner;
   log("loading qr-scanner…");
-  try {
-    const mod = await import(QR_SCANNER_CDN);
-    QrScanner = mod.default;
-    QrScanner.WORKER_PATH = QR_WORKER_CDN;
-    log("qr-scanner loaded, BarcodeDetector native="+await QrScanner.hasCamera(), "ok");
-    return QrScanner;
-  } catch(e) { log("qr-scanner load failed: "+e.message, "err"); throw e; }
+  const m = await import(QS_JS);
+  QrScanner = m.default;
+  QrScanner.WORKER_PATH = QS_W;
+  log("qr-scanner ready","ok");
+  return QrScanner;
 }
 
-// ─── DEBUG LOG ────────────────────────────────────────────────────────────────
+// ── Log ───────────────────────────────────────────────────────────────────────
 const logWrap = document.getElementById("log-wrap");
-let logVisible = true;
+let logVis = true;
 window.toggleLog = () => {
-  logVisible = !logVisible;
-  logWrap.style.display = logVisible ? "block" : "none";
-  document.getElementById("log-btn").textContent = logVisible ? "LOG ▼" : "LOG ▲";
+  logVis = !logVis;
+  logWrap.style.display = logVis?"block":"none";
 };
-function log(msg, type="info") {
-  console.log("["+type+"]", msg);
-  const d = document.createElement("div");
-  d.className = "e " + type;
-  d.textContent = new Date().toISOString().substr(11,8) + " " + msg;
-  logWrap.appendChild(d);
-  logWrap.scrollTop = logWrap.scrollHeight;
+function log(m,t="info"){
+  console.log(m);
+  const d=document.createElement("div");
+  d.className="e "+t;
+  d.textContent=new Date().toISOString().substr(11,8)+" "+m;
+  logWrap.appendChild(d); logWrap.scrollTop=logWrap.scrollHeight;
 }
-window.onerror = (m,s,l) => log("ERR: "+m+" ("+s+":"+l+")", "err");
-window.onunhandledrejection = e => log("PROMISE: "+(e.reason?.message||e.reason), "err");
+window.onerror=(m,s,l)=>log("ERR:"+m+" "+s+":"+l,"err");
+window.onunhandledrejection=e=>log("PROMISE:"+(e.reason?.message||e.reason),"err");
 
-// ─── QR DRAW ─────────────────────────────────────────────────────────────────
-function drawQR(canvasEl, text) {
+// ── QR draw ───────────────────────────────────────────────────────────────────
+function drawQR(el, text) {
   log("drawQR len="+text.length);
-  try {
-    const size = Math.min(260, Math.floor(window.innerWidth * 0.7));
-    canvasEl.width = size; canvasEl.height = size;
-    const tmp = document.createElement("div");
-    new QRCode(tmp, {
-      text, width:size, height:size,
-      colorDark:"#000", colorLight:"#fff",
-      correctLevel: QRCode.CorrectLevel.M
-    });
-    const src = tmp.querySelector("canvas") || tmp.querySelector("img");
-    if (!src) { log("QR: no element generated", "err"); return; }
-    const draw = () => canvasEl.getContext("2d").drawImage(src,0,0,size,size);
-    src.tagName==="CANVAS" || src.complete ? draw() : (src.onload=draw);
-    log("drawQR ok", "ok");
-  } catch(e) { log("drawQR err: "+e.message, "err"); }
+  const sz=Math.min(240,Math.floor(window.innerWidth*0.65));
+  el.width=sz; el.height=sz;
+  const tmp=document.createElement("div");
+  new QRCode(tmp,{text,width:sz,height:sz,colorDark:"#000",colorLight:"#fff",correctLevel:QRCode.CorrectLevel.M});
+  const src=tmp.querySelector("canvas")||tmp.querySelector("img");
+  if(!src){log("QR gen failed","err");return;}
+  const draw=()=>el.getContext("2d").drawImage(src,0,0,sz,sz);
+  src.tagName==="CANVAS"||src.complete?draw():(src.onload=draw);
 }
 
-// ─── CANVAS / GAME ───────────────────────────────────────────────────────────
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-let W, H;
-function resize() { W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
-window.addEventListener("resize", resize); resize();
-
-const MAX_SCORE=5, PAD={w:120,h:12,margin:30};
-let gameRunning=false, gameResult="", role=null, dc=null;
-let state={ball:{x:0,y:0},host:{x:0},guest:{x:0},score:{host:0,guest:0},paused:true};
-let myX=0, ballSpeed=300, ballVx=0, ballVy=0;
-
-function initState() {
-  state.ball.x=W/2; state.ball.y=H/2;
-  state.host.x=W/2; state.guest.x=W/2;
-  state.score={host:0,guest:0};
-  ballSpeed=300; myX=W/2;
-  serveBall();
-}
-function serveBall() {
-  const a=(Math.random()*Math.PI/3)-Math.PI/6, d=Math.random()>.5?1:-1;
-  ballVx=Math.sin(a); ballVy=Math.cos(a)*d;
-  state.ball.x=W/2; state.ball.y=H/2;
-  state.paused=true; setTimeout(()=>{state.paused=false;},800);
-}
-function hostUpdate(dt) {
-  if(state.paused) return;
-  state.ball.x+=ballVx*ballSpeed*dt; state.ball.y+=ballVy*ballSpeed*dt;
-  if(state.ball.x<0||state.ball.x>W) ballVx*=-1;
-  if(state.ball.y>H-PAD.margin-PAD.h&&Math.abs(state.ball.x-state.host.x)<PAD.w/2) hitPad(state.host.x,-1);
-  if(state.ball.y<PAD.margin+PAD.h&&Math.abs(state.ball.x-state.guest.x)<PAD.w/2) hitPad(state.guest.x,1);
-  if(state.ball.y<0){state.score.host++;checkWin();serveBall();}
-  if(state.ball.y>H){state.score.guest++;checkWin();serveBall();}
-}
-function hitPad(px,dir) {
-  const off=(state.ball.x-px)/(PAD.w/2);
-  ballSpeed=Math.min(ballSpeed*1.05,900);
-  ballVx=Math.sin(off*Math.PI/3); ballVy=Math.cos(off*Math.PI/3)*dir;
-  if(navigator.vibrate) navigator.vibrate(10);
-}
-function checkWin() {
-  if(state.score.host>=MAX_SCORE||state.score.guest>=MAX_SCORE) {
-    state.paused=true;
-    gameResult=state.score.host>=MAX_SCORE?"host":"guest";
-    setTimeout(()=>{gameResult="";initState();},2000);
-  }
-}
-function draw() {
-  ctx.fillStyle="#000"; ctx.fillRect(0,0,W,H);
-  if(!gameRunning) return;
-  ctx.fillStyle="#fff";
-  ctx.setLineDash([10,10]); ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2);
-  ctx.strokeStyle="#fff"; ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillRect(state.host.x-PAD.w/2,H-PAD.margin-PAD.h,PAD.w,PAD.h);
-  ctx.fillRect(state.guest.x-PAD.w/2,PAD.margin,PAD.w,PAD.h);
-  ctx.beginPath(); ctx.arc(state.ball.x,state.ball.y,8,0,Math.PI*2); ctx.fill();
-  ctx.font="20px monospace"; ctx.textAlign="center";
-  ctx.fillText(state.score.guest,W/2,40);
-  ctx.fillText(state.score.host,W/2,H-20);
-  if(gameResult) {
-    const won=(role==="host"&&gameResult==="host")||(role==="guest"&&gameResult==="guest");
-    ctx.font="bold 28px monospace"; ctx.fillText(won?"YOU WIN!":"YOU LOSE",W/2,H/2);
-  }
-}
-let lastTime=0;
-function loop(t) {
-  const dt=Math.min((t-lastTime)/1000,0.05); lastTime=t;
-  if(gameRunning&&role==="host"){
-    state.host.x=myX; hostUpdate(dt);
-    if(dc&&dc.readyState==="open") dc.send(JSON.stringify({type:"state",state,ballVx,ballVy,ballSpeed}));
-  }
-  draw(); requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
-
-canvas.addEventListener("touchstart",e=>moveMe(e.touches[0].clientX));
-canvas.addEventListener("touchmove", e=>moveMe(e.touches[0].clientX));
-canvas.addEventListener("mousemove", e=>moveMe(e.clientX));
-function moveMe(x) {
-  if(!gameRunning) return;
-  myX=clamp(x,PAD.w/2,W-PAD.w/2);
-  if(role==="guest"&&dc&&dc.readyState==="open") dc.send(JSON.stringify({type:"input",x:myX}));
-}
-
-// ─── SDP PACK / UNPACK ───────────────────────────────────────────────────────
-function extract(sdp,prefix) {
-  const l=sdp.split("\n").find(l=>l.trimStart().startsWith(prefix));
-  return l?l.trim().slice(prefix.length).trim():"";
-}
-function packSDP(sdpObj) {
-  const sdp=sdpObj.sdp;
-  const type  = sdpObj.type==="offer"?"o":"a";
-  const ufrag = extract(sdp,"a=ice-ufrag:");
-  const pwd   = extract(sdp,"a=ice-pwd:");
-  const fp    = extract(sdp,"a=fingerprint:").replace(/^sha-256 /i,"");
-  const setup = extract(sdp,"a=setup:");
-  const cands = sdp.split("\n").filter(l=>l.trimStart().startsWith("a=candidate:"))
-                    .map(l=>l.trim().slice("a=candidate:".length));
-  const cand  = cands.find(c=>c.includes("srflx"))||cands[0]||"";
-  const packed= [type,ufrag,pwd,fp,setup,cand].join("|");
-  log("packed="+packed.length+" chars");
+// ── SDP pack/unpack ───────────────────────────────────────────────────────────
+function extr(sdp,pfx){const l=sdp.split("\n").find(l=>l.trimStart().startsWith(pfx));return l?l.trim().slice(pfx.length).trim():"";}
+function packSDP(sdpObj){
+  const s=sdpObj.sdp;
+  const type=sdpObj.type==="offer"?"o":"a";
+  const ufrag=extr(s,"a=ice-ufrag:");
+  const pwd=extr(s,"a=ice-pwd:");
+  const fp=extr(s,"a=fingerprint:").replace(/^sha-256 /i,"");
+  const setup=extr(s,"a=setup:");
+  const cands=s.split("\n").filter(l=>l.trimStart().startsWith("a=candidate:")).map(l=>l.trim().slice("a=candidate:".length));
+  const cand=cands.find(c=>c.includes("srflx"))||cands[0]||"";
+  const packed=[type,ufrag,pwd,fp,setup,cand].join("|");
+  log("packed="+packed.length);
   return btoa(packed).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 }
-function unpackSDP(enc) {
-  const packed=atob(enc.replace(/-/g,"+").replace(/_/g,"/"));
-  log("unpacked="+packed.length+" chars");
+function unpackSDP(enc){
+  const packed=atob(enc.trim().replace(/-/g,"+").replace(/_/g,"/"));
   const [type,ufrag,pwd,fp,setup,cand]=packed.split("|");
-  const sdp=[
-    "v=0","o=- 1 1 IN IP4 0.0.0.0","s=-","t=0 0",
-    "a=group:BUNDLE 0",
-    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
-    "c=IN IP4 0.0.0.0",
-    "a=ice-ufrag:"+ufrag,"a=ice-pwd:"+pwd,
-    "a=ice-options:trickle",
-    "a=fingerprint:sha-256 "+fp,
-    "a=setup:"+setup,"a=mid:0",
+  const sdp=["v=0","o=- 1 1 IN IP4 0.0.0.0","s=-","t=0 0","a=group:BUNDLE 0",
+    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel","c=IN IP4 0.0.0.0",
+    "a=ice-ufrag:"+ufrag,"a=ice-pwd:"+pwd,"a=ice-options:trickle",
+    "a=fingerprint:sha-256 "+fp,"a=setup:"+setup,"a=mid:0",
     "a=sctp-port:5000","a=max-message-size:262144",
-    cand?"a=candidate:"+cand:""
-  ].filter(Boolean).join("\r\n")+"\r\n";
-  return {type:type==="o"?"offer":"answer", sdp};
+    cand?"a=candidate:"+cand:""].filter(Boolean).join("\r\n")+"\r\n";
+  return{type:type==="o"?"offer":"answer",sdp};
 }
 
-// ─── WebRTC ───────────────────────────────────────────────────────────────────
-const RTC_CFG={iceServers:[
-  {urls:"stun:stun.l.google.com:19302"},
-  {urls:"stun:stun1.l.google.com:19302"}
-]};
-let pc=null;
+// ── Share / copy helpers ──────────────────────────────────────────────────────
+function makeURL(payload, role) {
+  const u = new URL(location.href);
+  u.hash = role + payload;   // #o<payload> for offer, #a<payload> for answer
+  return u.toString();
+}
+async function shareOrCopy(url, label) {
+  if (navigator.share) {
+    try { await navigator.share({title:"Pong "+label, url}); return; } catch(e){}
+  }
+  await copyText(url);
+  alert("Copied! Send to the other player.");
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); log("copied","ok"); }
+  catch(e) { log("copy failed: "+e.message,"err"); }
+}
 
-function createPC() {
+// ── Handle incoming hash (guest opens the link) ───────────────────────────────
+function checkHash() {
+  const h = location.hash.slice(1);
+  if (h.startsWith("o")) {
+    log("detected offer in URL hash");
+    // Auto-fill guest textarea and switch to join screen
+    showScreen("s-join");
+    document.getElementById("ta-offer").value = h.slice(1);
+    setEl("join-hint","Offer received! Tap CONNECT");
+  } else if (h.startsWith("a")) {
+    log("detected answer in URL hash");
+    // Auto-fill host answer textarea
+    showScreen("s-host");
+    setEl("host-hint","Answer received!");
+    document.getElementById("host-answer-area").style.display="flex";
+    document.getElementById("ta-answer").value = h.slice(1);
+    setEl("st-host","Tap SUBMIT ANSWER to connect");
+  }
+}
+
+// ── Scanner helper ────────────────────────────────────────────────────────────
+async function startScanner(container, onResult) {
+  const Qs = await getQrScanner();
+  container.innerHTML="";
+  const vid=document.createElement("video");
+  vid.setAttribute("autoplay",""); vid.setAttribute("playsinline",""); vid.setAttribute("muted","");
+  vid.style.cssText="width:260px;height:260px;object-fit:cover;border:2px solid #0f0;display:block;";
+  container.appendChild(vid);
+  const scanner = new Qs(vid, r=>{
+    log("scanned len="+r.data.length,"ok");
+    scanner.stop(); scanner.destroy();
+    container.innerHTML="";
+    onResult(r.data);
+  },{returnDetailedScanResult:true,preferredCamera:"environment",maxScansPerSecond:8,highlightScanRegion:true});
+  await scanner.start();
+  log("scanner started","ok");
+}
+
+// ── RTC ───────────────────────────────────────────────────────────────────────
+const RTC_CFG={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
+let pc=null, dc=null, role=null;
+
+function createPC(){
   log("createPC");
   pc=new RTCPeerConnection(RTC_CFG);
-  pc.onicecandidate=e=>log("cand: "+(e.candidate?e.candidate.type:"null(done)"));
-  pc.onicegatheringstatechange=()=>log("iceGather: "+pc.iceGatheringState);
-  pc.oniceconnectionstatechange=()=>{
-    log("iceCon: "+pc.iceConnectionState);
-    if(pc.iceConnectionState==="failed") log("ICE failed!","err");
-  };
+  pc.onicecandidate=e=>log("cand:"+(e.candidate?e.candidate.type:"done"));
+  pc.onicegatheringstatechange=()=>log("iceGather:"+pc.iceGatheringState);
+  pc.oniceconnectionstatechange=()=>log("iceCon:"+pc.iceConnectionState);
   return pc;
 }
-function waitICE(pc,ms=6000) {
+function waitICE(pc,ms=6000){
   return new Promise(res=>{
-    if(pc.iceGatheringState==="complete"){log("ICE already done");return res();}
+    if(pc.iceGatheringState==="complete"){log("ICE done already");return res();}
     pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState==="complete"){log("ICE done","ok");res();}};
-    setTimeout(()=>{log("ICE timeout, continuing");res();},ms);
+    setTimeout(()=>{log("ICE timeout");res();},ms);
   });
 }
 
-// ── Scanner helper (nimiq) ────────────────────────────────────────────────────
-async function startScanner(videoEl, onResult) {
-  const Qs = await loadQrScanner();
-  log("creating QrScanner instance");
-  const scanner = new Qs(videoEl, result => {
-    log("QR scanned: len="+result.data.length, "ok");
-    scanner.stop();
-    scanner.destroy();
-    onResult(result.data);
-  }, {
-    returnDetailedScanResult: true,
-    preferredCamera: 'environment',
-    maxScansPerSecond: 5,
-    highlightScanRegion: true,
-    highlightCodeOutline: true,
-  });
-  try {
-    await scanner.start();
-    log("scanner started", "ok");
-
-    // Ask for continuous autofocus on Android
-    const track = videoEl.srcObject?.getVideoTracks?.()[0];
-    if (track) {
-      const caps = track.getCapabilities?.() || {};
-      log("focusModes: "+JSON.stringify(caps.focusMode||[]));
-      if (caps.focusMode?.includes("continuous")) {
-        await track.applyConstraints({advanced:[{focusMode:"continuous"}]});
-        log("focusMode=continuous applied","ok");
-      }
-    }
-  } catch(e) { log("scanner.start error: "+e.message,"err"); }
-  return scanner;
-}
-
-// ── HOST ──────────────────────────────────────────────────────────────────────
-async function startHost() {
-  log("startHost");
-  role="host";
+// ── HOST flow ─────────────────────────────────────────────────────────────────
+async function startHost(){
+  log("startHost"); role="host";
   showScreen("s-host");
+  setEl("host-hint","Generating offer…");
+
   pc=createPC();
   dc=pc.createDataChannel("pong");
   setupDC(dc);
 
   const offer=await pc.createOffer();
   await pc.setLocalDescription(offer);
-  log("waiting ICE…");
   await waitICE(pc);
 
   const payload=packSDP(pc.localDescription);
-  log("QR payload len="+payload.length);
-  setEl("host-hint","Show this QR to the other player");
+  log("offer payload len="+payload.length);
+
+  // Show QR (for iOS guest)
+  document.getElementById("host-qr-wrap").style.display="block";
   drawQR(document.getElementById("qr-host"), payload);
-  setEl("st-host","Then tap SCAN GUEST QR");
-  document.getElementById("btn-scan-guest").style.display="block";
+
+  // Share / copy buttons
+  const offerURL = makeURL(payload,"o");
+  document.getElementById("host-share-btns").style.display="flex";
+  document.getElementById("host-divider").style.display="block";
+  document.getElementById("btn-share").onclick=()=>shareOrCopy(offerURL,"Offer");
+  document.getElementById("btn-copy").onclick=async()=>{await copyText(offerURL);alert("Copied!");};
+
+  setEl("host-hint","Share link with guest, then wait for their reply");
+  setEl("st-host","Waiting for guest…");
+  document.getElementById("host-answer-area").style.display="flex";
+
+  document.getElementById("btn-paste-answer").onclick=()=>{
+    const v=document.getElementById("ta-answer").value.trim();
+    if(v) applyAnswer(v); else alert("Paste the guest's code first");
+  };
+  document.getElementById("btn-scan-answer").onclick=()=>{
+    startScanner(document.getElementById("host-scan-area"), applyAnswer);
+  };
 }
 
-document.getElementById("btn-scan-guest").onclick = async () => {
-  log("host: scan guest QR");
-  document.getElementById("btn-scan-guest").style.display="none";
-  document.getElementById("host-qr-box").style.display="none";
-  setEl("st-host","Scanning guest QR…");
-
-  const area=document.getElementById("host-scan-area");
-  area.innerHTML="";
-  const vid=document.createElement("video");
-  vid.setAttribute("autoplay",""); vid.setAttribute("playsinline",""); vid.setAttribute("muted","");
-  vid.style.cssText="width:260px;height:260px;object-fit:cover;border:2px solid #fff;display:block;";
-  area.appendChild(vid);
-
-  await startScanner(vid, async data => {
+async function applyAnswer(data){
+  log("applyAnswer");
+  try{
+    // data might be a full URL (hash) or raw payload
+    let payload=data;
+    if(data.includes("#")) payload=new URL(data).hash.slice(2); // skip #a
+    const sdpObj=unpackSDP(payload);
+    await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
+    log("host remote desc set","ok");
     setEl("st-host","Connecting…");
-    area.innerHTML="";
-    try {
-      const sdpObj=unpackSDP(data);
-      log("host setRemoteDesc answer");
-      await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
-      log("host remote desc set","ok");
-    } catch(e){ log("host handshake err: "+e.message,"err"); }
-  });
-};
+  }catch(e){log("applyAnswer err:"+e.message,"err");}
+}
 
-// ── GUEST ─────────────────────────────────────────────────────────────────────
-async function startJoin() {
-  log("startJoin");
-  role="guest";
+// ── GUEST flow ────────────────────────────────────────────────────────────────
+async function startJoin(){
+  log("startJoin"); role="guest";
   showScreen("s-join");
-  const vid=document.getElementById("scan-video");
+  document.getElementById("btn-scan-offer").onclick=()=>{
+    startScanner(document.getElementById("join-scan-area"), processOffer);
+  };
+  document.getElementById("btn-submit-offer").onclick=()=>{
+    const v=document.getElementById("ta-offer").value.trim();
+    if(v) processOffer(v); else alert("Paste the host's code first");
+  };
+}
 
-  await startScanner(vid, async data => {
-    document.getElementById("scan-region").style.display="none";
-    setEl("st-join","Generating answer…");
-    try {
-      const sdpObj=unpackSDP(data);
-      log("guest setRemoteDesc offer");
-      pc=createPC();
-      pc.ondatachannel=e=>{log("ondatachannel","ok");dc=e.channel;setupDC(dc);};
-      await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
-      const answer=await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await waitICE(pc);
-      const payload=packSDP(pc.localDescription);
-      log("answer QR len="+payload.length);
-      setEl("join-hint","Show this QR to the HOST");
-      document.getElementById("answer-qr-box").style.display="block";
-      drawQR(document.getElementById("qr-answer"), payload);
-      setEl("st-join","Waiting for host to scan…");
-    } catch(e){ log("guest err: "+e.message,"err"); }
-  });
+async function processOffer(data){
+  log("processOffer");
+  setEl("st-join","Processing…");
+  try{
+    let payload=data;
+    if(data.includes("#")) payload=new URL(data).hash.slice(2); // skip #o
+    const sdpObj=unpackSDP(payload);
+    pc=createPC();
+    pc.ondatachannel=e=>{log("ondatachannel","ok");dc=e.channel;setupDC(dc);};
+    await pc.setRemoteDescription(new RTCSessionDescription(sdpObj));
+    const answer=await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await waitICE(pc);
+    const answerPayload=packSDP(pc.localDescription);
+    const answerURL=makeURL(answerPayload,"a");
+    log("answer payload="+answerPayload.length);
+
+    // Show answer QR + share
+    document.getElementById("join-answer-area").style.display="flex";
+    document.getElementById("answer-qr-wrap").style.display="block";
+    drawQR(document.getElementById("qr-answer"), answerPayload);
+    document.getElementById("btn-share-answer").onclick=()=>shareOrCopy(answerURL,"Answer");
+    document.getElementById("btn-copy-answer").onclick=async()=>{await copyText(answerURL);alert("Copied!");};
+    setEl("join-hint","Send reply to host:");
+    setEl("st-join","Waiting for host to apply answer…");
+  }catch(e){log("processOffer err:"+e.message,"err");}
 }
 
 // ── DataChannel ───────────────────────────────────────────────────────────────
-function setupDC(ch) {
+function setupDC(ch){
   log("setupDC");
-  ch.onopen=()=>{
-    log("DC open!","ok");
-    hideUI(); initState(); myX=W/2; gameRunning=true;
-  };
+  ch.onopen=()=>{log("DC open!","ok");hideUI();initState();myX=W/2;gameRunning=true;};
   ch.onclose=()=>log("DC closed","err");
-  ch.onerror=e=>log("DC error: "+e,"err");
+  ch.onerror=e=>log("DC err:"+e,"err");
   ch.onmessage=e=>{
     const msg=JSON.parse(e.data);
     if(msg.type==="state"&&role==="guest"){
       const s=msg.state;
-      state.guest.x=s.guest.x; state.host.x=s.host.x;
+      state.guest.x=s.guest.x;state.host.x=s.host.x;
       state.score={host:s.score.guest,guest:s.score.host};
-      state.ball.x=s.ball.x; state.ball.y=H-s.ball.y;
-      state.paused=s.paused; gameResult="";
-      if(s.paused&&s.score.host>=MAX_SCORE)  gameResult="guest";
-      if(s.paused&&s.score.guest>=MAX_SCORE) gameResult="host";
-      const tmp={...state.host}; state.host={...state.guest}; state.guest=tmp;
-    } else if(msg.type==="input"&&role==="host"){
-      state.guest.x=msg.x;
-    }
+      state.ball.x=s.ball.x;state.ball.y=H-s.ball.y;
+      state.paused=s.paused;gameResult="";
+      if(s.paused&&s.score.host>=MAX_SCORE)gameResult="guest";
+      if(s.paused&&s.score.guest>=MAX_SCORE)gameResult="host";
+      const t={...state.host};state.host={...state.guest};state.guest=t;
+    }else if(msg.type==="input"&&role==="host"){state.guest.x=msg.x;}
   };
 }
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-function showScreen(id){
-  ["s-home","s-host","s-join"].forEach(s=>document.getElementById(s).style.display="none");
-  document.getElementById(id).style.display="flex";
+// ── Game ──────────────────────────────────────────────────────────────────────
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+window.addEventListener("resize",resize);resize();
+const MAX_SCORE=5,PAD={w:120,h:12,margin:30};
+let gameRunning=false,gameResult="";
+let state={ball:{x:0,y:0},host:{x:0},guest:{x:0},score:{host:0,guest:0},paused:true};
+let myX=0,ballSpeed=300,ballVx=0,ballVy=0;
+function initState(){state.ball.x=W/2;state.ball.y=H/2;state.host.x=W/2;state.guest.x=W/2;state.score={host:0,guest:0};ballSpeed=300;myX=W/2;serveBall();}
+function serveBall(){const a=(Math.random()*Math.PI/3)-Math.PI/6,d=Math.random()>.5?1:-1;ballVx=Math.sin(a);ballVy=Math.cos(a)*d;state.ball.x=W/2;state.ball.y=H/2;state.paused=true;setTimeout(()=>{state.paused=false;},800);}
+function hostUpdate(dt){
+  if(state.paused)return;
+  state.ball.x+=ballVx*ballSpeed*dt;state.ball.y+=ballVy*ballSpeed*dt;
+  if(state.ball.x<0||state.ball.x>W)ballVx*=-1;
+  if(state.ball.y>H-PAD.margin-PAD.h&&Math.abs(state.ball.x-state.host.x)<PAD.w/2)hitPad(state.host.x,-1);
+  if(state.ball.y<PAD.margin+PAD.h&&Math.abs(state.ball.x-state.guest.x)<PAD.w/2)hitPad(state.guest.x,1);
+  if(state.ball.y<0){state.score.host++;checkWin();serveBall();}
+  if(state.ball.y>H){state.score.guest++;checkWin();serveBall();}
 }
-function hideUI(){ document.getElementById("ui").style.display="none"; }
-function setEl(id,t){ const e=document.getElementById(id); if(e) e.textContent=t; }
-function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function hitPad(px,dir){const o=(state.ball.x-px)/(PAD.w/2);ballSpeed=Math.min(ballSpeed*1.05,900);ballVx=Math.sin(o*Math.PI/3);ballVy=Math.cos(o*Math.PI/3)*dir;if(navigator.vibrate)navigator.vibrate(10);}
+function checkWin(){if(state.score.host>=MAX_SCORE||state.score.guest>=MAX_SCORE){state.paused=true;gameResult=state.score.host>=MAX_SCORE?"host":"guest";setTimeout(()=>{gameResult="";initState();},2000);}}
+function draw(){
+  ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
+  if(!gameRunning)return;
+  ctx.fillStyle="#fff";ctx.setLineDash([10,10]);ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.strokeStyle="#fff";ctx.stroke();ctx.setLineDash([]);
+  ctx.fillRect(state.host.x-PAD.w/2,H-PAD.margin-PAD.h,PAD.w,PAD.h);
+  ctx.fillRect(state.guest.x-PAD.w/2,PAD.margin,PAD.w,PAD.h);
+  ctx.beginPath();ctx.arc(state.ball.x,state.ball.y,8,0,Math.PI*2);ctx.fill();
+  ctx.font="20px monospace";ctx.textAlign="center";
+  ctx.fillText(state.score.guest,W/2,40);ctx.fillText(state.score.host,W/2,H-20);
+  if(gameResult){const w=(role==="host"&&gameResult==="host")||(role==="guest"&&gameResult==="guest");ctx.font="bold 28px monospace";ctx.fillText(w?"YOU WIN!":"YOU LOSE",W/2,H/2);}
+}
+let lastTime=0;
+function loop(t){const dt=Math.min((t-lastTime)/1000,0.05);lastTime=t;if(gameRunning&&role==="host"){state.host.x=myX;hostUpdate(dt);if(dc&&dc.readyState==="open")dc.send(JSON.stringify({type:"state",state,ballVx,ballVy,ballSpeed}));}draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+canvas.addEventListener("touchstart",e=>moveMe(e.touches[0].clientX));
+canvas.addEventListener("touchmove",e=>moveMe(e.touches[0].clientX));
+canvas.addEventListener("mousemove",e=>moveMe(e.clientX));
+function moveMe(x){if(!gameRunning)return;myX=clamp(x,PAD.w/2,W-PAD.w/2);if(role==="guest"&&dc&&dc.readyState==="open")dc.send(JSON.stringify({type:"input",x:myX}));}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function showScreen(id){["s-home","s-host","s-join"].forEach(s=>document.getElementById(s).style.display="none");document.getElementById(id).style.display="flex";}
+function hideUI(){document.getElementById("ui").style.display="none";}
+function setEl(id,t){const e=document.getElementById(id);if(e)e.textContent=t;}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 
 document.getElementById("btn-host").onclick=startHost;
 document.getElementById("btn-join").onclick=startJoin;
 
-log("ready | QRCode="+(typeof QRCode)+" | RTC="+(typeof RTCPeerConnection)+" | media="+(typeof navigator.mediaDevices));
+checkHash(); // handle if page opened via link
+log("ready | RTC="+(typeof RTCPeerConnection)+" | share="+(!!navigator.share));
 </script>
 </body>
 </html>
