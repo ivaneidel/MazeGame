@@ -172,11 +172,17 @@ async function connectToHost(){
 
 // ── Data connection ───────────────────────────────────────────────────────────
 function setupConn(c){
-  log("setupConn");
-  c.on("open",()=>{
+  log("setupConn, open="+c.open);
+
+  function onOpen(){
     log("conn open!","ok");
     hideUI(); initState(); myX=W/2; gameRunning=true;
-  });
+  }
+
+  // "open" may have already fired by the time we get here
+  if(c.open) onOpen();
+  else c.on("open", onOpen);
+
   c.on("data", msg=>{
     if(msg.type==="state" && role==="guest"){
       const s=msg.state;
