@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sound Link FAST</title>
+<title>Sound Link FAST + Live Decode</title>
 
 <style>
 body {
@@ -39,10 +39,10 @@ body {
 
 <script>
 // ===== CONFIG =====
-const BASE = 800;      // Hz
-const STEP = 120;      // Hz spacing
-const SYMBOL_BITS = 4; // 4 bits per tone
-const SYMBOL_TIME = 40; // ms
+const BASE = 800;
+const STEP = 120;
+const SYMBOL_BITS = 4;
+const SYMBOL_TIME = 40;
 
 const PREAMBLE = "10101010101010101010101010101010";
 
@@ -76,7 +76,7 @@ function buildPayload(str){
 
 // ===== SENDER =====
 async function startSender(){
-  const msg = prompt("Message", "HELLO");
+  const msg = prompt("Message", "HELLO WORLD");
   if(!msg) return;
 
   log("⏳ 3s...");
@@ -90,7 +90,6 @@ async function startSender(){
   for(let i=0;i<bits.length;i+=SYMBOL_BITS){
     const chunk = bits.slice(i,i+SYMBOL_BITS).padEnd(SYMBOL_BITS,"0");
     const value = parseInt(chunk,2);
-
     const freq = BASE + value * STEP;
 
     const osc = audioCtx.createOscillator();
@@ -101,7 +100,6 @@ async function startSender(){
     osc.start();
 
     await sleep(SYMBOL_TIME);
-
     osc.stop();
 
     progress.innerText =
@@ -133,7 +131,6 @@ async function startReceiver(){
     analyser.getByteFrequencyData(data);
 
     const freq = detectFreq(data, audioCtx.sampleRate);
-
     const value = Math.round((freq - BASE) / STEP);
 
     if(value >=0 && value < 16){
@@ -152,19 +149,36 @@ async function startReceiver(){
     if(synced && !expectedLen && buffer.length>=32){
       expectedLen = parseInt(buffer.slice(0,32),2);
       buffer = buffer.slice(32);
-      log("📏 "+expectedLen);
+      log("📏 Bits expected: "+expectedLen);
     }
 
-    if(expectedLen && buffer.length>=expectedLen){
-      const msg = bitsToStr(buffer.slice(0,expectedLen));
-      log("📥 "+msg);
+    let decoded = "";
+    let usableBits = buffer;
 
+    if(expectedLen){
+      usableBits = buffer.slice(0, expectedLen);
+    }
+
+    // decode full bytes only
+    const fullBytes = Math.floor(usableBits.length / 8) * 8;
+    decoded = bitsToStr(usableBits.slice(0, fullBytes));
+
+    // FINAL MESSAGE
+    if(expectedLen && buffer.length >= expectedLen){
+      log("📥 FINAL: " + decoded);
       stream.getTracks().forEach(t=>t.stop());
       return;
     }
 
     document.getElementById("bits").innerText =
-      `Freq: ${Math.floor(freq)} Hz\nValue: ${value}\n\nBuffer:\n${buffer.slice(-200)}`;
+`Freq: ${Math.floor(freq)} Hz
+Value: ${value}
+
+Decoded (live):
+${decoded}
+
+Raw bits:
+${buffer.slice(-200)}`;
 
     requestAnimationFrame(loop);
   }
