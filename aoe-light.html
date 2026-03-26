@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>AoE Light</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; touch-action:none; font-family:sans-serif; }
+canvas { display:block; }
+#res-bar {
+  position:fixed; top:0; left:0; right:0; height:36px;
+  background:rgba(10,10,10,0.92); border-bottom:1px solid #333;
+  display:flex; align-items:center; padding:0 8px; gap:10px;
+  font-size:12px; color:#eee; z-index:10;
+}
+.res { display:flex; align-items:center; gap:3px; }
+.res-val { font-weight:bold; min-width:22px; }
+#wave-info { margin-left:auto; font-size:10px; color:#aaa; white-space:nowrap; flex-shrink:0; }
+/* HUD: vertical stack — info row on top, action buttons below */
+#hud {
+  position:fixed; bottom:0; left:0; right:0;
+  background:rgba(10,10,10,0.92); border-top:2px solid #444;
+  display:flex; flex-direction:column; z-index:10;
+}
+#hud-info-row {
+  display:flex; flex-direction:row; align-items:stretch; min-height:52px; border-bottom:1px solid #333;
+}
+#sel-panel { flex:1; padding:5px 8px; min-width:0; display:flex; flex-direction:column; justify-content:center; }
+#sel-name { font-size:12px; font-weight:bold; color:#ffd700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#sel-detail { color:#aaa; margin-top:2px; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#train-bar-wrap { height:4px; background:#333; border-radius:2px; margin-top:4px; display:none; }
+#train-bar { height:100%; background:#4fc3f7; border-radius:2px; width:0%; }
+#minimap-wrap { width:80px; flex-shrink:0; border-left:1px solid #444; }
+#minimap { width:100%; height:100%; display:block; }
+#action-row {
+  display:flex; flex-wrap:wrap; align-items:center;
+  padding:5px 8px; gap:5px; min-height:40px;
+}
+.btn {
+  background:#2a2a2a; color:#eee; border:1px solid #555;
+  border-radius:6px; padding:5px 9px; font-size:11px; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; gap:1px;
+  min-width:58px; touch-action:manipulation;
+}
+.btn:active { background:#444; }
+.btn.disabled { opacity:0.4; pointer-events:none; }
+.btn .cost { color:#aaa; font-size:9px; }
+#toast {
+  position:fixed; top:44px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.85); color:#ffd700; padding:5px 14px;
+  border-radius:20px; font-size:12px; pointer-events:none;
+  opacity:0; transition:opacity 0.3s; white-space:nowrap; z-index:20;
+}
+#overlay {
+  position:fixed; inset:0; display:none; flex-direction:column;
+  align-items:center; justify-content:center; z-index:30;
+  background:rgba(0,0,0,0.8); color:#eee;
+}
+#overlay h1 { font-size:2em; margin-bottom:10px; }
+#overlay p  { color:#aaa; margin-bottom:16px; font-size:14px; text-align:center; max-width:280px; }
+.ov-btns { display:flex; gap:12px; }
+.ov-btn { padding:10px 24px; border:none; border-radius:8px; font-size:14px; font-weight:bold; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="res-bar">
+  <div class="res"><span>🌾</span><span class="res-val" id="r-food">0</span></div>
+  <div class="res"><span>🪵</span><span class="res-val" id="r-wood">0</span></div>
+  <div class="res"><span>⛏️</span><span class="res-val" id="r-stone">0</span></div>
+  <div class="res"><span>🪙</span><span class="res-val" id="r-gold">0</span></div>
+  <div id="wave-info"></div>
+  <button id="menu-btn" style="margin-left:8px;background:#222;border:1px solid #555;color:#eee;border-radius:6px;padding:3px 9px;font-size:13px;cursor:pointer;">⚙</button>
+</div>
+<div id="game-menu" style="display:none;position:fixed;top:40px;right:8px;background:#1a1a1a;border:1px solid #555;border-radius:8px;z-index:25;padding:6px;min-width:150px;">
+  <button onclick="confirmNewGame()" style="width:100%;background:none;border:none;color:#eee;padding:8px 12px;text-align:left;font-size:13px;cursor:pointer;border-radius:6px;">🗺 New Game</button>
+  <button onclick="toggleFullscreen()" style="width:100%;background:none;border:none;color:#eee;padding:8px 12px;text-align:left;font-size:13px;cursor:pointer;border-radius:6px;">⛶ Fullscreen</button>
+</div>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div id="hud-info-row">
+    <div id="sel-panel">
+      <div id="sel-name">No selection</div>
+      <div id="sel-detail">Tap a unit or building to select</div>
+      <div id="train-bar-wrap"><div id="train-bar"></div></div>
+    </div>
+    <div id="minimap-wrap"><canvas id="minimap"></canvas></div>
+  </div>
+  <div id="action-row"></div>
+</div>
+<div id="toast"></div>
+<div id="overlay">
+  <h1 id="ov-title"></h1>
+  <p id="ov-msg"></p>
+  <div class="ov-btns">
+    <button class="ov-btn" id="ov-continue" style="background:#4fc3f7;color:#000;display:none" onclick="loadGame()">Continue</button>
+    <button class="ov-btn" style="background:#ffd700;color:#000" onclick="newGame()">New Game</button>
+  </div>
+</div>
+
+<script>
+const gc=document.getElementById('game'),ctx=gc.getContext('2d');
+const mm=document.getElementById('minimap'),mctx=mm.getContext('2d');
+const toast=document.getElementById('toast');
+const overlay=document.getElementById('overlay');
+
+const TILE=32,MAP_W=80,MAP_H=80;
+const TC_COL=[['#4a7c3f','#3a6030'],['#2d5a1b','#1e4010'],['#2a6ba8','#1e5080'],['#888','#666'],['#c9b46a','#a89050']];
+const fog=new Uint8Array(MAP_W*MAP_H);
+const SIGHT_UNIT=6,SIGHT_BLDG=5;
+const BUSH_REGROW_MS=90000;
+const TOWER_LIFETIME_MS=180000;
+
+let W,H,HUD_H=0;
+let map=[],resources=[],units=[],buildings=[],particles=[],arrows=[];
+let selectedIds=new Set(),selectedBldgId=null,moveTarget=null;
+let res={food:0,wood:0,stone:0,gold:0};
+let uidNext=1,gameOver=false;
+let aiState={waveTimer:120000,waveCount:0};
+let cam={x:0,y:0,zoom:1};
+let lastTime=0,buildMode=null,autosaveTimer=0,mapSeeds=null;
+
+const TRAIN_COST={villager:{food:50},swordsman:{food:100,wood:50},archer:{food:75,wood:75},knight:{food:150,gold:100}};
+const TRAIN_MS={villager:8000,swordsman:10000,archer:9000,knight:14000};
+const BUILD_COST={barracks:{wood:150,stone:50},tower:{stone:120,wood:30}};
+const BUILD_MS={barracks:8000,tower:6000};
+
+// ── Map ───────────────────────────────────────────────────────────────────────
+function noise(x,y,s){let n=Math.sin(x*127.1+y*311.7+s*74.3)*43758.5453;return n-Math.floor(n);}
+function smooth(x,y,s){let v=0,a=1,f=1,m=0;for(let o=0;o<5;o++){v+=noise(x*f/MAP_W,y*f/MAP_H,s+o)*a;m+=a;a*=0.5;f*=2;}return v/m;}
+function generateMap(seeds){
+  map=[];
+  const[s1,s2,s3]=seeds||[Math.random()*1000,Math.random()*1000,Math.random()*1000];
+  for(let y=0;y<MAP_H;y++){map[y]=[];for(let x=0;x<MAP_W;x++){
+    const h=smooth(x,y,s1),mo=smooth(x,y,s2),f=smooth(x,y,s3);
+    let t;if(h<0.28)t=2;else if(h<0.33)t=4;else if(f>0.62)t=1;else if(mo>0.65)t=3;else t=0;
+    map[y][x]=t;
+  }}
+  fog.fill(0);return[s1,s2,s3];
+}
+
+// ── Fog ───────────────────────────────────────────────────────────────────────
+function revealCircle(cx,cy,r){
+  const x0=Math.max(0,cx-r),x1=Math.min(MAP_W-1,cx+r),y0=Math.max(0,cy-r),y1=Math.min(MAP_H-1,cy+r);
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)if((x-cx)**2+(y-cy)**2<=r*r)fog[y*MAP_W+x]=2;
+}
+function updateFog(){
+  for(let i=0;i<fog.length;i++)if(fog[i]===2)fog[i]=1;
+  for(const u of units){if(u.team!==0||u.hp<=0)continue;revealCircle(Math.floor(u.x/TILE),Math.floor(u.y/TILE),SIGHT_UNIT);}
+  for(const b of buildings){if(b.team!==0||b.hp<=0)continue;const d=BD[b.type];revealCircle(b.tx+Math.floor(d.w/2),b.ty+Math.floor(d.h/2),SIGHT_BLDG);}
+}
+
+// ── Resources ─────────────────────────────────────────────────────────────────
+const RD={
+  tree:    {color:'#1a6b10',dark:'#0d4008',res:'wood', max:150},
+  bush:    {color:'#2e8b2e',dark:'#1a5a1a',res:'food', max:100},
+  rockpile:{color:'#7a7a7a',dark:'#555',   res:'stone',max:200},
+  goldvein:{color:'#c8a020',dark:'#8a6a10',res:'gold', max:120},
+};
+function placeResources(){
+  resources=[];let rid=1;
+  for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++){
+    const t=map[y][x];let rt=null;
+    if(t===1&&Math.random()<0.55)rt='tree';
+    else if(t===0&&Math.random()<0.018)rt='bush';
+    else if(t===3&&Math.random()<0.4)rt='rockpile';
+    else if(t===3&&Math.random()<0.08)rt='goldvein';
+    if(rt)resources.push({id:rid++,type:rt,tx:x,ty:y,amount:RD[rt].max,maxAmount:RD[rt].max,regrowTimer:0});
+  }
+  return rid;
+}
+function placeStartingBushes(pcx,pcy,ridStart){
+  let rid=ridStart,placed=0;
+  for(let r=3;r<=10&&placed<6;r++){
+    for(let dy=-r;dy<=r&&placed<6;dy++)for(let dx=-r;dx<=r&&placed<6;dx++){
+      if(Math.abs(dx)!==r&&Math.abs(dy)!==r)continue;
+      const x=pcx+dx,y=pcy+dy;
+      if(x<0||y<0||x>=MAP_W||y>=MAP_H)continue;
+      if(map[y][x]!==0)continue;
+      if(resources.find(r=>r.tx===x&&r.ty===y))continue;
+      if(Math.random()<0.55){resources.push({id:rid++,type:'bush',tx:x,ty:y,amount:RD.bush.max,maxAmount:RD.bush.max,regrowTimer:0});placed++;}
+    }
+  }
+}
+function updateResources(dt){
+  for(const r of resources){
+    if(r.type!=='bush'||r.amount>0)continue;
+    r.regrowTimer+=dt;
+    if(r.regrowTimer>=BUSH_REGROW_MS){r.amount=RD.bush.max;r.regrowTimer=0;}
+  }
+}
+
+// ── Buildings ─────────────────────────────────────────────────────────────────
+const BD={
+  town_center:{label:'Town Center',w:2,h:2,color:'#b06030',roof:'#8a4020',maxHp:800,trains:['villager']},
+  barracks:   {label:'Barracks',   w:2,h:2,color:'#607080',roof:'#404858',maxHp:400,trains:['swordsman','archer','knight']},
+  tower:      {label:'Tower',      w:1,h:1,color:'#708090',roof:'#506070',maxHp:500,trains:[],atkRange:6,atkDmg:14,atkSpd:2200,lifetime:true},
+};
+function findGrassNear(tx,ty){
+  for(let r=0;r<25;r++)for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+    const x=Math.max(2,Math.min(MAP_W-4,tx+dx)),y=Math.max(2,Math.min(MAP_H-4,ty+dy));
+    if(map[y]&&map[y][x]===0&&map[y+1]&&map[y+1][x+1]===0)return[x,y];
+  }return[tx,ty];
+}
+function placeBuildings(pcx,pcy){
+  buildings=[];
+  buildings.push({id:uidNext++,type:'town_center',tx:pcx-1,ty:pcy-1,team:0,hp:800,trainQueue:[],trainTimer:0,constructing:false,buildTimer:0,atkTimer:0});
+  const corners=[[4,4],[MAP_W-6,4],[4,MAP_H-6],[MAP_W-6,MAP_H-6]];
+  corners.sort((a,b)=>-(Math.hypot(a[0]-pcx,a[1]-pcy)-Math.hypot(b[0]-pcx,b[1]-pcy)));
+  const[ecx,ecy]=findGrassNear(corners[0][0],corners[0][1]);
+  buildings.push({id:uidNext++,type:'town_center',tx:ecx,ty:ecy,team:1,hp:800,trainQueue:[],trainTimer:0,constructing:false,buildTimer:0,atkTimer:0});
+}
+function bldgAt(tx,ty){for(const b of buildings){const d=BD[b.type];if(tx>=b.tx&&tx<b.tx+d.w&&ty>=b.ty&&ty<b.ty+d.h)return b;}return null;}
+function bldgCenter(b){const d=BD[b.type];return{x:(b.tx+d.w/2)*TILE,y:(b.ty+d.h/2)*TILE};}
+function canPlaceBuilding(type,tx,ty){
+  const d=BD[type];
+  for(let dy=0;dy<d.h;dy++)for(let dx=0;dx<d.w;dx++){
+    const x=tx+dx,y=ty+dy;
+    if(x<0||y<0||x>=MAP_W||y>=MAP_H)return false;
+    if(map[y][x]!==0)return false;
+    if(bldgAt(x,y))return false;
+  }return true;
+}
+
+// ── Units ─────────────────────────────────────────────────────────────────────
+const UD={
+  villager: {label:'Villager', color:'#e8c97a',size:8, speed:1.4, hp:40, maxHp:40, atk:5, range:1.2,atkSpd:900, gather:true},
+  swordsman:{label:'Swordsman',color:'#e06060',size:10,speed:0.95,hp:100,maxHp:100,atk:18,range:1.2,atkSpd:800, gather:false},
+  archer:   {label:'Archer',   color:'#70b8e0',size:9, speed:1.05,hp:65, maxHp:65, atk:12,range:4.5,atkSpd:1100,gather:false},
+  knight:   {label:'Knight',   color:'#c090e0',size:11,speed:0.85,hp:160,maxHp:160,atk:28,range:1.2,atkSpd:700, gather:false},
+};
+const CARRY_MAX=20,GATHER_MS=900;
+function spawnUnit(type,tx,ty,team,isWaveUnit=false){
+  units.push({id:uidNext++,type,x:(tx+0.5)*TILE,y:(ty+0.5)*TILE,
+    path:[],state:'idle',task:null,team,isWaveUnit,_attackBldg:false,
+    hp:UD[type].maxHp,gatherTimer:0,atkTimer:0,carrying:null,carryAmt:0});
+}
+function findOpen(cx,cy){
+  for(let r=1;r<20;r++)for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+    const x=cx+dx,y=cy+dy;
+    if(tileWalkable(x,y,false)&&!bldgAt(x,y)&&!units.find(u=>Math.floor(u.x/TILE)===x&&Math.floor(u.y/TILE)===y))return[x,y];
+  }return[cx,cy];
+}
+function initUnits(pcx,pcy){
+  units=[];
+  ['villager','villager','villager','swordsman','archer'].forEach(t=>{const[x,y]=findOpen(pcx,pcy);spawnUnit(t,x,y,0);});
+  const et=buildings.find(b=>b.type==='town_center'&&b.team===1);
+  if(et){const ec=bldgCenter(et);const etx=Math.floor(ec.x/TILE),ety=Math.floor(ec.y/TILE);
+    ['villager','villager'].forEach(t=>{const[x,y]=findOpen(etx,ety);spawnUnit(t,x,y,1);});}
+}
+
+// ── Training ──────────────────────────────────────────────────────────────────
+function canAfford(cost){for(const[k,v]of Object.entries(cost))if((res[k]||0)<v)return false;return true;}
+function deduct(cost){for(const[k,v]of Object.entries(cost))res[k]-=v;}
+function queueTrain(bldg,unitType){
+  if(bldg.team!==0)return;
+  const cost=TRAIN_COST[unitType];
+  if(!canAfford(cost)){showToast('Not enough resources');return;}
+  deduct(cost);bldg.trainQueue.push({type:unitType,cost});showToast(`Queued ${UD[unitType].label}`);
+}
+function updateTraining(bldg,dt){
+  if(!bldg.trainQueue.length)return;
+  bldg.trainTimer+=dt;
+  const cur=bldg.trainQueue[0];
+  if(bldg.trainTimer>=TRAIN_MS[cur.type]){
+    bldg.trainTimer=0;bldg.trainQueue.shift();
+    const bc=bldgCenter(bldg);const[sx,sy]=findOpen(Math.floor(bc.x/TILE),Math.floor(bc.y/TILE));
+    spawnUnit(cur.type,sx,sy,0);showToast(`${UD[cur.type].label} ready!`);
+  }
+}
+function updateConstruction(bldg,dt){
+  if(!bldg.constructing)return;
+  bldg.buildTimer+=dt;
+  if(bldg.buildTimer>=BUILD_MS[bldg.type]){bldg.constructing=false;showToast(`${BD[bldg.type].label} complete!`);}
+}
+
+// ── Towers ────────────────────────────────────────────────────────────────────
+function updateTowers(dt){
+  for(let i=buildings.length-1;i>=0;i--){
+    const b=buildings[i];
+    if(b.type!=='tower'||b.team!==0||b.hp<=0||b.constructing)continue;
+    b.lifetimeTimer=(b.lifetimeTimer||0)+dt;
+    if(b.lifetimeTimer>=TOWER_LIFETIME_MS){
+      spawnParticle(bldgCenter(b).x,bldgCenter(b).y,'#888',10);
+      buildings.splice(i,1);showToast('Tower crumbled!');continue;
+    }
+    b.atkTimer=(b.atkTimer||0)+dt;
+    if(b.atkTimer<BD.tower.atkSpd)continue;
+    const bc=bldgCenter(b);const rangePx=BD.tower.atkRange*TILE;
+    let tgt=null,bd=99999;
+    for(const u of units){if(u.team===0||u.hp<=0)continue;const d=dist(bc.x,bc.y,u.x,u.y);if(d<=rangePx&&d<bd){bd=d;tgt=u;}}
+    if(!tgt)continue;
+    b.atkTimer=0;
+    arrows.push({x:bc.x,y:bc.y,tx:tgt.x,ty:tgt.y,targetId:tgt.id,dmg:BD.tower.atkDmg,done:false});
+  }
+}
+function updateArrows(dt){
+  const spd=dt*0.3;
+  for(let i=arrows.length-1;i>=0;i--){
+    const a=arrows[i];const dx=a.tx-a.x,dy=a.ty-a.y,d=Math.sqrt(dx*dx+dy*dy);
+    if(d<spd){
+      const tgt=units.find(u=>u.id===a.targetId&&u.hp>0);
+      if(tgt){tgt.hp-=a.dmg;spawnParticle(tgt.x,tgt.y,'#ff4444',3);if(tgt.hp<=0)tgt.hp=0;}
+      arrows.splice(i,1);
+    }else{a.x+=dx/d*spd;a.y+=dy/d*spd;}
+  }
+}
+
+// ── Pathfinding ───────────────────────────────────────────────────────────────
+function tileWalkable(tx,ty,forG){
+  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return false;
+  const t=map[ty][tx];
+  if(t===2)return false;
+  if(!forG&&(t===1||t===3))return false;
+  if(bldgAt(tx,ty))return false;
+  return true;
+}
+function adjWalkable(tx,ty){for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){if(tileWalkable(tx+dx,ty+dy,false))return[tx+dx,ty+dy];}return null;}
+function astar(sx,sy,ex,ey,adj){
+  if(!tileWalkable(ex,ey,false)){
+    if(adj){const a=adjWalkable(ex,ey);if(a)[ex,ey]=a;else return[];}
+    else{let b=null,bd=99;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const nx=ex+dx,ny=ey+dy;if(tileWalkable(nx,ny,false)){const d=Math.abs(dx)+Math.abs(dy);if(d<bd){bd=d;b=[nx,ny];}}}if(!b)return[];[ex,ey]=b;}
+  }
+  if(sx===ex&&sy===ey)return[];
+  const open=[],closed=new Set(),g={},f={},from={},key=(x,y)=>x+','+y;
+  g[key(sx,sy)]=0;f[key(sx,sy)]=Math.abs(sx-ex)+Math.abs(sy-ey);open.push({x:sx,y:sy,f:f[key(sx,sy)]});
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];let it=0;
+  while(open.length&&it++<500){
+    open.sort((a,b)=>a.f-b.f);const cur=open.shift();
+    if(cur.x===ex&&cur.y===ey){const p=[];let c=key(ex,ey);while(from[c]){p.unshift(c);c=from[c];}return p.map(k=>{const[px,py]=k.split(',').map(Number);return{x:px,y:py};});}
+    closed.add(key(cur.x,cur.y));
+    for(const[dx,dy]of dirs){
+      const nx=cur.x+dx,ny=cur.y+dy;if(!tileWalkable(nx,ny,false)||closed.has(key(nx,ny)))continue;
+      const cost=(Math.abs(dx)+Math.abs(dy)===2)?1.414:1;const ng=(g[key(cur.x,cur.y)]||0)+cost;const nk=key(nx,ny);
+      if(ng<(g[nk]??Infinity)){from[nk]=key(cur.x,cur.y);g[nk]=ng;f[nk]=ng+Math.abs(nx-ex)+Math.abs(ny-ey);if(!open.find(o=>o.x===nx&&o.y===ny))open.push({x:nx,y:ny,f:f[nk]});}
+    }
+  }return[];
+}
+
+// ── Combat ────────────────────────────────────────────────────────────────────
+function dist(ax,ay,bx,by){return Math.sqrt((ax-bx)**2+(ay-by)**2);}
+function nearestEnemy(u){
+  let best=null,bd=99999;
+  for(const e of units){if(e.team===u.team||e.hp<=0)continue;const d=dist(u.x,u.y,e.x,e.y);if(d<bd){bd=d;best=e;}}
+  if(!best&&u._attackBldg){
+    for(const b of buildings){if(b.team===u.team||b.hp<=0||b.constructing)continue;const bc=bldgCenter(b);const d=dist(u.x,u.y,bc.x,bc.y);if(d<bd){bd=d;best={...b,_bldg:true,x:bc.x,y:bc.y};}}
+  }
+  return best;
+}
+function spawnParticle(x,y,color,n=5){for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=1+Math.random()*2;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:20+Math.random()*15,color});}}
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+function updateAI(dt){
+  if(gameOver)return;
+  const myTC=buildings.find(b=>b.type==='town_center'&&b.team===1);
+  if(!myTC||myTC.hp<=0)return;
+  units.filter(u=>u.team===1&&u.hp>0&&u.type==='villager').forEach(v=>{
+    if(v.state!=='idle'&&v.state!=='moving')return;
+    const vx=Math.floor(v.x/TILE),vy=Math.floor(v.y/TILE);
+    let best=null,bd=9999;
+    for(const r of resources){if(r.amount<=0)continue;const d=Math.abs(r.tx-vx)+Math.abs(r.ty-vy);if(d<bd){bd=d;best=r;}}
+    if(best){v.task={resId:best.id};v.state='gathering';v.path=[];v.gatherTimer=0;}
+  });
+  aiState.waveTimer-=dt;
+  if(aiState.waveTimer>0){
+    const secs=Math.ceil(aiState.waveTimer/1000),m=Math.floor(secs/60),s=secs%60;
+    document.getElementById('wave-info').textContent=aiState.waveCount===0?`⚔️ First wave in ${m}:${String(s).padStart(2,'0')}`:`⚔️ Next wave in ${m}:${String(s).padStart(2,'0')}`;
+  }
+  if(aiState.waveTimer<=0){
+    aiState.waveCount++;aiState.waveTimer=120000;
+    const tc=bldgCenter(myTC);const etx=Math.floor(tc.x/TILE),ety=Math.floor(tc.y/TILE);
+    const waveSize=1+Math.floor((aiState.waveCount-1)*0.7);
+    const types=aiState.waveCount<4?['swordsman']:aiState.waveCount<7?['swordsman','archer']:['swordsman','knight','archer'];
+    for(let i=0;i<waveSize;i++){const t=types[i%types.length];const[sx,sy]=findOpen(etx,ety);spawnUnit(t,sx,sy,1,true);}
+    document.getElementById('wave-info').textContent=`⚔️ Wave ${aiState.waveCount}!`;
+    showToast(`Enemy wave ${aiState.waveCount} incoming!`);
+    setTimeout(()=>{if(aiState.waveTimer<119000)document.getElementById('wave-info').textContent='';},3000);
+  }
+  units.filter(u=>u.team===1&&u.hp>0&&u.isWaveUnit).forEach(s=>{if(s.state==='idle')s.state='combat';});
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+function tcOf(team){return buildings.find(b=>b.type==='town_center'&&b.team===team);}
+function update(dt){
+  if(gameOver)return;
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vx*=0.85;p.vy*=0.85;p.life--;if(p.life<=0)particles.splice(i,1);}
+  updateResources(dt);
+  for(const b of buildings){if(b.team===0){updateTraining(b,dt);updateConstruction(b,dt);}}
+  updateTowers(dt);updateArrows(dt);
+  for(const u of units){
+    if(u.hp<=0)continue;const def=UD[u.type];
+    if(u.path&&u.path.length>0){
+      const n=u.path[0],wx=(n.x+0.5)*TILE,wy=(n.y+0.5)*TILE;
+      const dx=wx-u.x,dy=wy-u.y,d=Math.sqrt(dx*dx+dy*dy),spd=def.speed*dt*0.09;
+      if(d<spd){u.x=wx;u.y=wy;u.path.shift();}else{u.x+=dx/d*spd;u.y+=dy/d*spd;}
+    }
+    if(u.state==='gathering'&&u.task){
+      const node=resources.find(r=>r.id===u.task.resId);
+      if(!node||node.amount<=0){u.state='idle';u.task=null;continue;}
+      const ux=Math.floor(u.x/TILE),uy=Math.floor(u.y/TILE);
+      const adj=Math.abs(ux-node.tx)<=1&&Math.abs(uy-node.ty)<=1;
+      if(!adj&&u.path.length===0)u.path=astar(ux,uy,node.tx,node.ty,true);
+      if(adj&&u.path.length===0){
+        u.gatherTimer=(u.gatherTimer||0)+dt;
+        if(u.gatherTimer>=GATHER_MS){
+          u.gatherTimer=0;const take=Math.min(5,node.amount,CARRY_MAX-u.carryAmt);
+          node.amount-=take;u.carryAmt+=take;u.carrying=RD[node.type].res;
+          if(u.carryAmt>=CARRY_MAX||node.amount<=0){
+            u.state='returning';const tc=tcOf(u.team);
+            if(tc){const bc=bldgCenter(tc);u.path=astar(ux,uy,Math.floor(bc.x/TILE),Math.floor(bc.y/TILE),false);}
+          }
+        }
+      }
+    }
+    if(u.state==='returning'&&u.path.length===0){
+      if(u.carrying&&u.carryAmt>0){if(u.team===0)res[u.carrying]=(res[u.carrying]||0)+u.carryAmt;u.carryAmt=0;u.carrying=null;}
+      if(u.task){const node=resources.find(r=>r.id===u.task.resId);if(node&&node.amount>0)u.state='gathering';else{u.state='idle';u.task=null;}}
+      else u.state='idle';
+    }
+    const isAggressor=u.state==='combat'||(u.team===1&&u.isWaveUnit);
+    if(isAggressor){
+      const atkRange=def.range*TILE;let tgt=null;
+      for(const e of units){if(e.team===u.team||e.hp<=0)continue;if(dist(u.x,u.y,e.x,e.y)<=atkRange){tgt=e;break;}}
+      if(!tgt){for(const b of buildings){if(b.team===u.team||b.hp<=0||b.constructing)continue;const bc=bldgCenter(b);if(dist(u.x,u.y,bc.x,bc.y)<=atkRange+TILE){tgt=b;break;}}}
+      if(tgt){
+        u.path=[];u.atkTimer=(u.atkTimer||0)+dt;
+        if(u.atkTimer>=def.atkSpd){
+          u.atkTimer=0;const dmg=(def.atk+(Math.random()*4-2))|0;tgt.hp-=dmg;
+          const tx=tgt._bldg?bldgCenter(tgt).x:tgt.x,ty2=tgt._bldg?bldgCenter(tgt).y:tgt.y;
+          spawnParticle(tx,ty2,'#ff4444',4);
+          if(tgt.hp<=0){if(tgt._bldg||buildings.includes(tgt)){spawnParticle(tx,ty2,'#ff8800',14);const idx=buildings.indexOf(tgt);if(idx>-1)buildings.splice(idx,1);checkWinLose();}}
+        }
+      }else if(u.path.length===0){
+        const e=nearestEnemy(u);
+        if(e){u.path=astar(Math.floor(u.x/TILE),Math.floor(u.y/TILE),Math.floor(e.x/TILE),Math.floor(e.y/TILE),true);}
+        u.state='combat';
+      }
+    }
+    if(u.team===0&&u.type!=='villager'&&u.state==='idle'&&u.path.length===0){
+      for(const e of units){if(e.team===u.team||e.hp<=0)continue;if(dist(u.x,u.y,e.x,e.y)<=def.range*TILE){u.state='combat';break;}}
+    }
+  }
+  for(let i=units.length-1;i>=0;i--){if(units[i].hp<=0)units.splice(i,1);}
+  for(const id of selectedIds){if(!units.find(u=>u.id===id))selectedIds.delete(id);}
+  if(selectedBldgId&&!buildings.find(b=>b.id===selectedBldgId))selectedBldgId=null;
+  updateAI(dt);updateFog();updateResBar();
+  autosaveTimer+=dt;if(autosaveTimer>=30000){autosaveTimer=0;saveGame();}
+}
+
+function checkWinLose(){
+  if(!buildings.find(b=>b.type==='town_center'&&b.team===0)){showOverlay('☠️ Defeated','Your Town Center was destroyed.',false);return;}
+  if(!buildings.find(b=>b.type==='town_center'&&b.team===1)){showOverlay('🏆 Victory!',`You survived ${aiState.waveCount} waves!`,false);return;}
+}
+function showOverlay(title,msg,showContinue){
+  gameOver=true;
+  document.getElementById('ov-title').textContent=title;document.getElementById('ov-msg').textContent=msg;
+  document.getElementById('ov-continue').style.display=showContinue?'block':'none';overlay.style.display='flex';
+}
+
+// ── Save / Load ───────────────────────────────────────────────────────────────
+function saveGame(){
+  if(gameOver)return;
+  try{
+    localStorage.setItem('aoe_save',JSON.stringify({
+      v:2,seeds:mapSeeds,res,uidNext,
+      aiState:{waveTimer:aiState.waveTimer,waveCount:aiState.waveCount},
+      cam:{x:cam.x,y:cam.y,zoom:cam.zoom},
+      resources:resources.map(r=>({...r})),
+      buildings:buildings.map(b=>({...b,trainQueue:b.trainQueue||[]})),
+      units:units.map(u=>({id:u.id,type:u.type,x:u.x,y:u.y,team:u.team,hp:u.hp,
+        state:u.state==='gathering'||u.state==='returning'?u.state:'idle',
+        task:u.task,carrying:u.carrying,carryAmt:u.carryAmt,isWaveUnit:u.isWaveUnit})),
+      fog:Array.from(fog),
+    }));
+  }catch(e){console.warn('Save failed',e);}
+}
+function loadGame(){
+  try{
+    const raw=localStorage.getItem('aoe_save');if(!raw)return false;
+    const s=JSON.parse(raw);if(!s.seeds)return false;
+    overlay.style.display='none';gameOver=false;
+    selectedIds.clear();selectedBldgId=null;moveTarget=null;particles=[];arrows=[];buildMode=null;
+    mapSeeds=s.seeds;generateMap(s.seeds);
+    res=s.res;uidNext=s.uidNext;
+    aiState={waveTimer:s.aiState.waveTimer,waveCount:s.aiState.waveCount};
+    cam={x:s.cam.x,y:s.cam.y,zoom:s.cam.zoom};
+    resources=s.resources.map(r=>({...r,regrowTimer:r.regrowTimer||0}));
+    buildings=s.buildings.map(b=>({...b,trainQueue:b.trainQueue||[],atkTimer:b.atkTimer||0}));
+    units=s.units.map(u=>({...u,path:[],atkTimer:0,gatherTimer:0,_attackBldg:false}));
+    fog.set(s.fog);lastTime=0;
+    requestAnimationFrame(loop);return true;
+  }catch(e){console.warn('Load failed',e);return false;}
+}
+function hasSave(){try{const s=localStorage.getItem('aoe_save');return s&&JSON.parse(s).v===2;}catch{return false;}}
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
+function w2s(wx,wy){return{sx:(wx-cam.x)*cam.zoom,sy:(wy-cam.y)*cam.zoom};}
+function s2w(sx,sy){return{wx:sx/cam.zoom+cam.x,wy:sy/cam.zoom+cam.y};}
+
+function drawMap(){
+  const tSz=TILE*cam.zoom;
+  const x0=Math.max(0,Math.floor(cam.x/TILE)),y0=Math.max(0,Math.floor(cam.y/TILE));
+  const x1=Math.min(MAP_W,Math.ceil((cam.x+W/cam.zoom)/TILE));
+  const y1=Math.min(MAP_H,Math.ceil((cam.y+(H-HUD_H)/cam.zoom)/TILE));
+  for(let ty=y0;ty<y1;ty++)for(let tx=x0;tx<x1;tx++){
+    const fi=fog[ty*MAP_W+tx];const{sx,sy}=w2s(tx*TILE,ty*TILE);
+    if(fi===0){ctx.fillStyle='#000';ctx.fillRect(sx,sy,tSz+1,tSz+1);continue;}
+    const t=map[ty][tx];ctx.globalAlpha=fi===1?0.4:1.0;
+    ctx.fillStyle=TC_COL[t][0];ctx.fillRect(sx,sy,tSz+0.5,tSz+0.5);
+    if(tSz>8){ctx.fillStyle=TC_COL[t][1];ctx.fillRect(sx,sy,tSz,1);ctx.fillRect(sx,sy,1,tSz);}
+    if(t===2&&tSz>14&&fi===2){ctx.fillStyle='rgba(255,255,255,0.1)';ctx.fillRect(sx+tSz*.1,sy+tSz*.38,tSz*.8,2);ctx.fillRect(sx+tSz*.2,sy+tSz*.62,tSz*.6,2);}
+    ctx.globalAlpha=1;
+  }
+  if(buildMode){
+    const d=BD[buildMode.type],tSz2=TILE*cam.zoom;
+    const{sx,sy}=w2s(buildMode.hoverTx*TILE,buildMode.hoverTy*TILE);
+    const valid=canPlaceBuilding(buildMode.type,buildMode.hoverTx,buildMode.hoverTy);
+    ctx.fillStyle=valid?'rgba(100,255,100,0.25)':'rgba(255,60,60,0.25)';ctx.fillRect(sx,sy,d.w*tSz2,d.h*tSz2);
+    ctx.strokeStyle=valid?'#4f4':'#f44';ctx.lineWidth=2;ctx.strokeRect(sx,sy,d.w*tSz2,d.h*tSz2);
+    if(buildMode.type==='tower'){
+      ctx.strokeStyle='rgba(100,200,255,0.3)';ctx.lineWidth=1;ctx.beginPath();
+      ctx.arc(sx+tSz2/2,sy+tSz2/2,BD.tower.atkRange*tSz2,0,Math.PI*2);ctx.stroke();
+    }
+  }
+}
+
+function drawResources(){
+  const tSz=TILE*cam.zoom;
+  const vx0=cam.x,vy0=cam.y,vx1=cam.x+W/cam.zoom,vy1=cam.y+(H-HUD_H)/cam.zoom;
+  for(const r of resources){
+    const fi=fog[r.ty*MAP_W+r.tx];if(fi===0)continue;
+    const wx=r.tx*TILE,wy=r.ty*TILE;if(wx+TILE<vx0||wx>vx1||wy+TILE<vy0||wy>vy1)continue;
+    const{sx,sy}=w2s(wx,wy);const def=RD[r.type];
+    if(r.type==='bush'&&r.amount<=0){
+      if(fi!==2)continue;
+      const pct=r.regrowTimer/BUSH_REGROW_MS;
+      ctx.globalAlpha=0.4;ctx.fillStyle='#3a2a1a';ctx.beginPath();ctx.ellipse(sx+tSz/2,sy+tSz*.65,tSz*.3,tSz*.15,0,0,Math.PI*2);ctx.fill();
+      if(pct>0.3){ctx.fillStyle=`rgba(60,160,60,${(pct-0.3)/0.7})`;ctx.beginPath();ctx.arc(sx+tSz/2,sy+tSz*.5,tSz*0.12*pct,0,Math.PI*2);ctx.fill();}
+      ctx.globalAlpha=1;continue;
+    }
+    if(r.amount<=0)continue;
+    const pct=r.amount/r.maxAmount;ctx.globalAlpha=fi===1?0.35:0.5+pct*0.5;
+    if(r.type==='tree'){
+      ctx.fillStyle=def.dark;ctx.fillRect(sx+tSz*.42,sy+tSz*.55,tSz*.16,tSz*.4);
+      ctx.fillStyle=def.color;ctx.beginPath();ctx.arc(sx+tSz/2,sy+tSz*.38,tSz*.32,0,Math.PI*2);ctx.fill();
+    }else if(r.type==='bush'){
+      ctx.fillStyle=def.color;[[.35,.55],[.65,.55],[.5,.42]].forEach(([bx,by])=>{ctx.beginPath();ctx.arc(sx+bx*tSz,sy+by*tSz,tSz*.22,0,Math.PI*2);ctx.fill();});
+      ctx.fillStyle='#9b2226';[[.35,.52],[.6,.5],[.5,.38]].forEach(([bx,by])=>{ctx.beginPath();ctx.arc(sx+bx*tSz,sy+by*tSz,tSz*.07,0,Math.PI*2);ctx.fill();});
+    }else if(r.type==='rockpile'){
+      ctx.fillStyle=def.color;ctx.beginPath();ctx.ellipse(sx+tSz/2,sy+tSz*.62,tSz*.38,tSz*.22,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=def.dark;ctx.beginPath();ctx.ellipse(sx+tSz*.38,sy+tSz*.48,tSz*.22,tSz*.18,-.3,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.fillStyle='#888';ctx.beginPath();ctx.ellipse(sx+tSz/2,sy+tSz*.6,tSz*.32,tSz*.2,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=def.color;[[.4,.45],[.58,.4],[.5,.55]].forEach(([gx,gy])=>{ctx.beginPath();ctx.arc(sx+gx*tSz,sy+gy*tSz,tSz*.1,0,Math.PI*2);ctx.fill();});
+    }
+    ctx.globalAlpha=1;
+    if(tSz>18&&fi===2){ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(sx+2,sy+tSz-5,tSz-4,4);
+      ctx.fillStyle=pct>.5?'#4caf50':pct>.25?'#ff9800':'#f44336';ctx.fillRect(sx+2,sy+tSz-5,(tSz-4)*pct,4);}
+  }
+}
+
+function drawBuildings(){
+  for(const b of buildings){
+    if(b.hp<=0)continue;
+    const def=BD[b.type];const bcTx=b.tx+Math.floor(def.w/2),bcTy=b.ty+Math.floor(def.h/2);
+    const fi=fog[bcTy*MAP_W+bcTx];if(fi===0)continue;
+    const{sx,sy}=w2s(b.tx*TILE,b.ty*TILE);const bw=def.w*TILE*cam.zoom,bh=def.h*TILE*cam.zoom;
+    ctx.globalAlpha=fi===1?0.4:1.0;
+    if(b.constructing){
+      ctx.fillStyle='rgba(150,120,60,0.5)';ctx.fillRect(sx,sy,bw,bh);
+      ctx.strokeStyle='#a08040';ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.strokeRect(sx,sy,bw,bh);ctx.setLineDash([]);
+      const pct=(b.buildTimer||0)/BUILD_MS[b.type];
+      ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(sx,sy-8,bw,5);ctx.fillStyle='#ffd700';ctx.fillRect(sx,sy-8,bw*pct,5);
+      if(cam.zoom>0.7){ctx.fillStyle='#ffd700';ctx.font=`bold ${Math.round(8*cam.zoom)}px sans-serif`;ctx.textAlign='center';ctx.fillText('Building…',sx+bw/2,sy-10);}
+      ctx.globalAlpha=1;continue;
+    }
+    if(b.type==='tower'){
+      ctx.fillStyle='rgba(0,0,0,0.3)';ctx.fillRect(sx+2,sy+2,bw,bh);
+      ctx.fillStyle='#556070';ctx.fillRect(sx,sy,bw,bh);
+      const bt=bw*0.22;ctx.fillStyle='#6a7a8a';
+      [[0,0],[0.55,0]].forEach(([ox])=>{ctx.fillRect(sx+ox*bw,sy-bt*.8,bt,bt*.8);});
+      ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(sx+bw*.38,sy+bh*.2,bw*.24,bh*.4);
+      if(fi===2){
+        const lt=1-(b.lifetimeTimer||0)/TOWER_LIFETIME_MS;
+        ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(sx,sy+bh+2,bw,4);
+        ctx.fillStyle=lt>0.5?'#4fc3f7':lt>0.25?'#ff9800':'#f44336';ctx.fillRect(sx,sy+bh+2,bw*lt,4);
+      }
+      if(selectedBldgId===b.id&&fi===2){
+        ctx.strokeStyle='rgba(100,200,255,0.4)';ctx.lineWidth=1.5;ctx.beginPath();
+        ctx.arc(sx+bw/2,sy+bh/2,def.atkRange*TILE*cam.zoom,0,Math.PI*2);ctx.stroke();
+      }
+    }
+    if(b.type!=='tower'){
+      ctx.fillStyle='rgba(0,0,0,0.3)';ctx.fillRect(sx+3,sy+3,bw,bh);
+      ctx.fillStyle=def.color;ctx.fillRect(sx,sy,bw,bh);
+      ctx.fillStyle=def.roof;ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(sx+bw/2,sy-bh*.25);ctx.lineTo(sx+bw,sy);ctx.closePath();ctx.fill();
+      ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(sx+bw*.42,sy+bh*.55,bw*.16,bh*.45);
+      ctx.fillStyle='rgba(255,220,100,0.5)';ctx.fillRect(sx+bw*.15,sy+bh*.25,bw*.15,bh*.2);ctx.fillRect(sx+bw*.7,sy+bh*.25,bw*.15,bh*.2);
+    }
+    if(selectedBldgId===b.id){ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.strokeRect(sx-2,sy-2,bw+4,bh+4);}
+    if(fi===2){
+      const hpPct=b.hp/def.maxHp;ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(sx,sy-8,bw,5);
+      ctx.fillStyle=hpPct>.5?'#4caf50':hpPct>.25?'#ff9800':'#f44336';ctx.fillRect(sx,sy-8,bw*hpPct,5);
+      if(b.team===0&&b.trainQueue&&b.trainQueue.length>0){
+        const pct=b.trainTimer/TRAIN_MS[b.trainQueue[0].type];
+        ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(sx,sy+bh+2,bw,4);ctx.fillStyle='#4fc3f7';ctx.fillRect(sx,sy+bh+2,bw*pct,4);
+      }
+    }
+    if(cam.zoom>0.7&&fi===2){ctx.fillStyle='#fff';ctx.font=`bold ${Math.round(8*cam.zoom)}px sans-serif`;ctx.textAlign='center';ctx.fillText(def.label,sx+bw/2,sy-10);}
+    ctx.fillStyle=b.team===0?'#4fc3f7':'#ef5350';
+    ctx.fillRect(sx+bw*.48,sy-bh*.5,bw*.035,bh*.28);
+    ctx.beginPath();ctx.moveTo(sx+bw*.515,sy-bh*.5);ctx.lineTo(sx+bw*.515+bw*.1,sy-bh*.38);ctx.lineTo(sx+bw*.515,sy-bh*.26);ctx.closePath();ctx.fill();
+    ctx.globalAlpha=1;
+  }
+}
+
+function drawArrows(){
+  for(const a of arrows){
+    const{sx,sy}=w2s(a.x,a.y);const dx=a.tx-a.x,dy=a.ty-a.y,angle=Math.atan2(dy,dx);
+    ctx.save();ctx.translate(sx,sy);ctx.rotate(angle);
+    ctx.fillStyle='#c8a060';ctx.fillRect(-6,-1,12,2);
+    ctx.fillStyle='#888';ctx.fillRect(5,-1.5,3,3);
+    ctx.restore();
+  }
+}
+
+function drawUnits(){
+  for(const u of units){
+    if(u.hp<=0)continue;
+    const ux=Math.floor(u.x/TILE),uy=Math.floor(u.y/TILE);
+    const fi=fog[Math.max(0,Math.min(MAP_H-1,uy))*MAP_W+Math.max(0,Math.min(MAP_W-1,ux))];
+    if(u.team===1&&fi!==2)continue;
+    const def=UD[u.type];const{sx,sy}=w2s(u.x,u.y);const r=def.size*cam.zoom;
+    const sel=selectedIds.has(u.id);
+    if(sel){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(sx,sy,r+4,0,Math.PI*2);ctx.stroke();}
+    ctx.fillStyle=def.color;ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,0.22)';ctx.beginPath();ctx.arc(sx-r*.2,sy-r*.2,r*.35,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=u.team===0?'#4fc3f7':'#ef5350';ctx.beginPath();ctx.arc(sx+r*.55,sy-r*.55,r*.28,0,Math.PI*2);ctx.fill();
+    if(u.hp<def.maxHp){const hp=u.hp/def.maxHp;ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(sx-r,sy+r+2,r*2,3);ctx.fillStyle=hp>.5?'#4caf50':hp>.25?'#ff9800':'#f44336';ctx.fillRect(sx-r,sy+r+2,r*2*hp,3);}
+    if(u.carrying&&u.carryAmt>0&&cam.zoom>0.7){ctx.font=`${Math.round(9*cam.zoom)}px sans-serif`;ctx.textAlign='center';ctx.fillText({food:'🌾',wood:'🪵',stone:'⛏️',gold:'🪙'}[u.carrying],sx,sy-r-3);}
+    if(u.state==='gathering'&&u.path.length===0){const p=Math.sin(Date.now()/200)*.5+.5;ctx.strokeStyle=`rgba(255,200,0,${p})`;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(sx,sy,r+6,0,Math.PI*2);ctx.stroke();}
+    if(cam.zoom>0.9){ctx.fillStyle='#fff';ctx.font=`${Math.round(7*cam.zoom)}px sans-serif`;ctx.textAlign='center';ctx.fillText(def.label[0],sx,sy+r*.4);}
+  }
+}
+
+function drawParticles(){
+  for(const p of particles){const{sx,sy}=w2s(p.x,p.y);ctx.globalAlpha=p.life/35;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(sx,sy,2*cam.zoom,0,Math.PI*2);ctx.fill();}
+  ctx.globalAlpha=1;
+}
+function drawMoveFeedback(){
+  if(!moveTarget)return;const{sx,sy}=w2s(moveTarget.x,moveTarget.y);
+  const a=1-(Date.now()-moveTarget.t)/600;if(a<=0){moveTarget=null;return;}
+  ctx.strokeStyle=`rgba(100,255,100,${a})`;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(sx-8,sy);ctx.lineTo(sx+8,sy);ctx.moveTo(sx,sy-8);ctx.lineTo(sx,sy+8);ctx.stroke();
+}
+
+function drawMinimap(){
+  const mw=mm.width,mh=mm.height;mctx.clearRect(0,0,mw,mh);
+  const tw=mw/MAP_W,th=mh/MAP_H;
+  for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++){
+    const fi=fog[y*MAP_W+x];if(fi===0){mctx.fillStyle='#000';mctx.fillRect(x*tw,y*th,tw+.5,th+.5);continue;}
+    mctx.globalAlpha=fi===1?0.4:1;mctx.fillStyle=TC_COL[map[y][x]][0];mctx.fillRect(x*tw,y*th,tw+.5,th+.5);mctx.globalAlpha=1;
+  }
+  for(const r of resources)if(r.amount>0&&fog[r.ty*MAP_W+r.tx]===2){mctx.fillStyle=RD[r.type].color;mctx.fillRect(r.tx*tw,r.ty*th,tw,th);}
+  for(const b of buildings){if(b.hp<=0)continue;const bcTx=b.tx+Math.floor(BD[b.type].w/2),bcTy=b.ty+Math.floor(BD[b.type].h/2);if(fog[bcTy*MAP_W+bcTx]===0)continue;mctx.fillStyle=b.team===0?'#4fc3f7':'#ef5350';const d=BD[b.type];mctx.fillRect(b.tx*tw,b.ty*th,d.w*tw,d.h*th);}
+  for(const u of units){if(u.hp<=0)continue;const ux=Math.max(0,Math.min(MAP_W-1,Math.floor(u.x/TILE))),uy=Math.max(0,Math.min(MAP_H-1,Math.floor(u.y/TILE)));if(u.team===1&&fog[uy*MAP_W+ux]!==2)continue;mctx.fillStyle=u.team===0?'#fff':'#ef5350';mctx.fillRect((u.x/TILE)*tw-1,(u.y/TILE)*th-1,3,3);}
+  const vx=(cam.x/TILE)*tw,vy=(cam.y/TILE)*th,vw=(W/cam.zoom/TILE)*tw,vh=((H-HUD_H)/cam.zoom/TILE)*th;
+  mctx.strokeStyle='rgba(255,255,255,0.7)';mctx.lineWidth=1;mctx.strokeRect(vx,vy,vw,vh);
+}
+
+function updateResBar(){
+  document.getElementById('r-food').textContent=res.food;document.getElementById('r-wood').textContent=res.wood;
+  document.getElementById('r-stone').textContent=res.stone;document.getElementById('r-gold').textContent=res.gold;
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function renderHUD(){
+  const actionRow=document.getElementById('action-row');
+  const nm=document.getElementById('sel-name'),det=document.getElementById('sel-detail');
+  const tbw=document.getElementById('train-bar-wrap'),tb=document.getElementById('train-bar');
+  actionRow.innerHTML='';
+
+  if(buildMode){
+    nm.textContent='Placing '+BD[buildMode.type].label;
+    det.textContent='Tap green tile to place';
+    const btn=document.createElement('button');btn.className='btn';btn.textContent='✕ Cancel';
+    btn.onclick=()=>buildMode=null;actionRow.appendChild(btn);
+    tbw.style.display='none';return;
+  }
+
+  const selUnits=units.filter(u=>selectedIds.has(u.id)&&u.hp>0);
+  const selBldg=selectedBldgId?buildings.find(b=>b.id===selectedBldgId):null;
+
+  if(selBldg&&selBldg.team===0&&!selBldg.constructing){
+    const def=BD[selBldg.type];
+    nm.textContent=`${def.label} ❤️ ${selBldg.hp}/${def.maxHp}`;
+    if(selBldg.type==='tower'){
+      const remaining=Math.ceil((TOWER_LIFETIME_MS-(selBldg.lifetimeTimer||0))/1000);
+      det.textContent=`Auto-fires • Crumbles in ${remaining}s`;
+      tbw.style.display='none';
+    }else{
+      det.textContent=selBldg.trainQueue&&selBldg.trainQueue.length?`Training: ${UD[selBldg.trainQueue[0].type].label}`:'Idle';
+      if(selBldg.trainQueue&&selBldg.trainQueue.length){
+        tbw.style.display='block';tb.style.width=Math.round(selBldg.trainTimer/TRAIN_MS[selBldg.trainQueue[0].type]*100)+'%';
+      }else tbw.style.display='none';
+    }
+    (def.trains||[]).forEach(ut=>{
+      const cost=TRAIN_COST[ut];
+      const btn=document.createElement('button');btn.className='btn'+(canAfford(cost)?'':' disabled');
+      btn.innerHTML=`${UD[ut].label}<span class="cost">${Object.entries(cost).map(([k,v])=>v+k[0].toUpperCase()).join(' ')}</span>`;
+      btn.onclick=()=>queueTrain(selBldg,ut);actionRow.appendChild(btn);
+    });
+    if(selBldg.type==='town_center'){
+      if(!buildings.some(b=>b.type==='barracks'&&b.team===0)){
+        const c=BUILD_COST.barracks;const btn=document.createElement('button');btn.className='btn'+(canAfford(c)?'':' disabled');
+        btn.innerHTML=`🏗 Barracks<span class="cost">150W 50S</span>`;
+        btn.onclick=()=>{if(!canAfford(c)){showToast('Need 150 Wood + 50 Stone');return;}buildMode={type:'barracks',hoverTx:0,hoverTy:0};};
+        actionRow.appendChild(btn);
+      }
+      const tc=BUILD_COST.tower;const tbtn=document.createElement('button');tbtn.className='btn'+(canAfford(tc)?'':' disabled');
+      tbtn.innerHTML=`🗼 Tower<span class="cost">120S 30W</span>`;
+      tbtn.onclick=()=>{if(!canAfford(tc)){showToast('Need 120 Stone + 30 Wood');return;}buildMode={type:'tower',hoverTx:0,hoverTy:0};};
+      actionRow.appendChild(tbtn);
+    }
+    return;
+  }
+
+  tbw.style.display='none';
+  if(!selUnits.length){nm.textContent='No selection';det.textContent='Tap unit or building to select';return;}
+  if(selUnits.length===1){
+    const u=selUnits[0],def=UD[u.type];
+    nm.textContent=`${def.label} ❤️ ${u.hp}/${def.maxHp}`;
+    det.textContent=u.state==='gathering'?`Gathering ${u.carrying||''} (${u.carryAmt}/${CARRY_MAX})`:u.state==='returning'?`Returning ${u.carrying}`:u.state==='combat'?'Fighting!':u.path.length>0?'Moving…':def.gather?'Idle • Tap resource or ground':'Idle • Tap to move or attack';
+  }else{
+    nm.textContent=`${selUnits.length} units`;
+    det.textContent=selUnits.map(u=>UD[u.type].label).join(', ');
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawMap();drawResources();drawBuildings();drawArrows();drawUnits();drawParticles();drawMoveFeedback();
+  drawMinimap();renderHUD();
+}
+
+function loop(ts){
+  const dt=lastTime?Math.min(ts-lastTime,100):16;lastTime=ts;
+  if(!gameOver){update(dt);draw();}else draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+let drag={active:false,startX:0,startY:0,camX:0,camY:0,moved:false};
+let pinch={active:false,dist:0};
+
+function bldgAtWorld(wx,wy){
+  const tx=Math.floor(wx/TILE),ty=Math.floor(wy/TILE);
+  return buildings.find(b=>{const d=BD[b.type];return tx>=b.tx&&tx<b.tx+d.w&&ty>=b.ty&&ty<b.ty+d.h&&!b.constructing;})||null;
+}
+function unitAt(wx,wy){
+  const maxR=Math.min(20,18/cam.zoom);let best=null,bd=999;
+  for(const u of units){
+    if(u.hp<=0)continue;
+    const ux=Math.max(0,Math.min(MAP_W-1,Math.floor(u.x/TILE))),uy=Math.max(0,Math.min(MAP_H-1,Math.floor(u.y/TILE)));
+    if(u.team===1&&fog[uy*MAP_W+ux]!==2)continue;
+    const dx=u.x-wx,dy=u.y-wy,d=Math.sqrt(dx*dx+dy*dy);if(d<maxR&&d<bd){bd=d;best=u;}
+  }return best;
+}
+function resAt(wx,wy){const tx=Math.floor(wx/TILE),ty=Math.floor(wy/TILE);if(fog[ty*MAP_W+tx]!==2)return null;return resources.find(r=>r.tx===tx&&r.ty===ty&&r.amount>0)||null;}
+
+function handleTap(sx,sy){
+  if(gameOver)return;
+  const{wx,wy}=s2w(sx,sy);const tx=Math.floor(wx/TILE),ty=Math.floor(wy/TILE);
+  if(buildMode){
+    if(canPlaceBuilding(buildMode.type,tx,ty)){
+      deduct(BUILD_COST[buildMode.type]);
+      const btype=buildMode.type;
+      buildings.push({id:uidNext++,type:btype,tx,ty,team:0,hp:BD[btype].maxHp,
+        trainQueue:[],trainTimer:0,constructing:true,buildTimer:0,atkTimer:0,lifetimeTimer:0});
+      buildMode=null;showToast('Building…');
+    }else showToast("Can't place there");
+    return;
+  }
+  const tapUnit=unitAt(wx,wy);
+  if(tapUnit&&tapUnit.team===1&&selectedIds.size>0){
+    const attackers=units.filter(u=>selectedIds.has(u.id)&&u.hp>0);
+    if(attackers.length){attackers.forEach(a=>{a.task=null;a.state='combat';a._attackBldg=false;a.path=astar(Math.floor(a.x/TILE),Math.floor(a.y/TILE),Math.floor(tapUnit.x/TILE),Math.floor(tapUnit.y/TILE),true);});showToast('Attacking!');return;}
+  }
+  if(tapUnit){selectedIds.clear();selectedBldgId=null;selectedIds.add(tapUnit.id);showToast(UD[tapUnit.type].label+' selected');return;}
+  const tapBldg=bldgAtWorld(wx,wy);
+  if(tapBldg){
+    if(tapBldg.team===1&&selectedIds.size>0){
+      const attackers=units.filter(u=>selectedIds.has(u.id)&&u.hp>0);
+      if(attackers.length){attackers.forEach(a=>{a.task=null;a.state='combat';a._attackBldg=true;const bc=bldgCenter(tapBldg);a.path=astar(Math.floor(a.x/TILE),Math.floor(a.y/TILE),Math.floor(bc.x/TILE),Math.floor(bc.y/TILE),true);});showToast('Attacking building!');return;}
+    }
+    selectedIds.clear();selectedBldgId=tapBldg.id;showToast(BD[tapBldg.type].label+' selected');return;
+  }
+  if(!selectedIds.size){selectedBldgId=null;return;}
+  selectedBldgId=null;
+  const rnode=resAt(wx,wy);
+  if(rnode){
+    const vils=units.filter(u=>selectedIds.has(u.id)&&u.type==='villager'&&u.hp>0);
+    if(!vils.length){showToast('Only villagers gather');return;}
+    vils.forEach(v=>{v.task={resId:rnode.id};v.state='gathering';v.path=[];v.gatherTimer=0;});
+    showToast('Gathering '+rnode.type);return;
+  }
+  if(!tileWalkable(tx,ty,false)){showToast("Can't move there");return;}
+  moveTarget={x:wx,y:wy,t:Date.now()};
+  units.filter(u=>selectedIds.has(u.id)&&u.hp>0).forEach((u,i)=>{
+    u.task=null;u.state='moving';u._attackBldg=false;
+    const ox=(i%3-1)*TILE*.8,oy=(Math.floor(i/3)-.5)*TILE*.8;
+    const etx=Math.floor((wx+ox)/TILE),ety=Math.floor((wy+oy)/TILE);
+    u.path=astar(Math.floor(u.x/TILE),Math.floor(u.y/TILE),etx,ety,false);
+  });showToast('Moving');
+}
+function handleMouseMove(sx,sy){
+  if(!buildMode)return;const{wx,wy}=s2w(sx,sy);buildMode.hoverTx=Math.floor(wx/TILE);buildMode.hoverTy=Math.floor(wy/TILE);
+}
+function showToast(msg){toast.textContent=msg;toast.style.opacity=1;clearTimeout(toast._t);toast._t=setTimeout(()=>toast.style.opacity=0,1400);}
+
+const menuBtn=document.getElementById('menu-btn');
+const gameMenu=document.getElementById('game-menu');
+menuBtn.onclick=e=>{e.stopPropagation();gameMenu.style.display=gameMenu.style.display==='none'?'block':'none';};
+document.addEventListener('click',()=>gameMenu.style.display='none');
+function toggleFullscreen(){gameMenu.style.display='none';if(!document.fullscreenElement)document.documentElement.requestFullscreen().catch(()=>{});else document.exitFullscreen();}
+function confirmNewGame(){gameMenu.style.display='none';if(confirm('Start a new game? Current progress will be lost.'))newGame();}
+
+gc.addEventListener('touchstart',e=>{e.preventDefault();
+  if(e.touches.length===2){pinch.active=true;const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;pinch.dist=Math.sqrt(dx*dx+dy*dy);drag.active=false;}
+  else{const t=e.touches[0];drag={active:true,startX:t.clientX,startY:t.clientY,camX:cam.x,camY:cam.y,moved:false};}
+},{passive:false});
+gc.addEventListener('touchmove',e=>{e.preventDefault();
+  if(e.touches.length===2&&pinch.active){const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY,d=Math.sqrt(dx*dx+dy*dy),cx=(e.touches[0].clientX+e.touches[1].clientX)/2,cy=(e.touches[0].clientY+e.touches[1].clientY)/2;const wx=cx/cam.zoom+cam.x,wy=cy/cam.zoom+cam.y;cam.zoom=Math.min(3,Math.max(0.3,cam.zoom*(d/pinch.dist)));cam.x=wx-cx/cam.zoom;cam.y=wy-cy/cam.zoom;pinch.dist=d;}
+  else if(drag.active&&e.touches.length===1){const t=e.touches[0],dx=t.clientX-drag.startX,dy=t.clientY-drag.startY;if(Math.abs(dx)+Math.abs(dy)>5)drag.moved=true;cam.x=drag.camX-dx/cam.zoom;cam.y=drag.camY-dy/cam.zoom;}
+  if(e.touches.length===1)handleMouseMove(e.touches[0].clientX,e.touches[0].clientY);
+},{passive:false});
+gc.addEventListener('touchend',e=>{e.preventDefault();if(pinch.active&&e.touches.length<2)pinch.active=false;if(drag.active&&!drag.moved&&e.changedTouches.length){const t=e.changedTouches[0];handleTap(t.clientX,t.clientY);}drag.active=false;},{passive:false});
+let md=false,mm2=false,ms={x:0,y:0},cs={x:0,y:0};
+gc.addEventListener('mousedown',e=>{md=true;mm2=false;ms={x:e.clientX,y:e.clientY};cs={x:cam.x,y:cam.y};});
+gc.addEventListener('mousemove',e=>{if(md){const dx=e.clientX-ms.x,dy=e.clientY-ms.y;if(Math.abs(dx)+Math.abs(dy)>4)mm2=true;cam.x=cs.x-dx/cam.zoom;cam.y=cs.y-dy/cam.zoom;}handleMouseMove(e.clientX,e.clientY);});
+gc.addEventListener('mouseup',e=>{if(!mm2)handleTap(e.clientX,e.clientY);md=false;});
+gc.addEventListener('wheel',e=>{e.preventDefault();const wx=e.clientX/cam.zoom+cam.x,wy=e.clientY/cam.zoom+cam.y;cam.zoom=Math.min(3,Math.max(0.3,cam.zoom*(e.deltaY>0?.9:1.1)));cam.x=wx-e.clientX/cam.zoom;cam.y=wy-e.clientY/cam.zoom;},{passive:false});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+function resize(){
+  W=gc.width=window.innerWidth;
+  H=gc.height=window.innerHeight;
+  HUD_H=document.getElementById('hud').offsetHeight||100;
+  mm.width=80;mm.height=document.getElementById('hud-info-row').offsetHeight||52;
+}
+window.addEventListener('resize',resize);
+
+function newGame(){
+  overlay.style.display='none';gameOver=false;
+  selectedIds.clear();selectedBldgId=null;moveTarget=null;particles=[];arrows=[];buildMode=null;
+  res={food:0,wood:0,stone:0,gold:0};aiState={waveTimer:120000,waveCount:0};
+  uidNext=1;autosaveTimer=0;lastTime=0;
+  document.getElementById('wave-info').textContent='';
+  resize();mapSeeds=generateMap();placeResources();
+  let cx=Math.floor(MAP_W*0.25),cy=Math.floor(MAP_H*0.25);
+  for(let r=0;r<30;r++){if(map[cy]&&map[cy][cx]===0)break;cx=Math.floor(MAP_W*0.25+(Math.random()-.5)*8);cy=Math.floor(MAP_H*0.25+(Math.random()-.5)*8);}
+  placeBuildings(cx,cy);
+  placeStartingBushes(cx,cy,resources.length+1);
+  initUnits(cx+3,cy);
+  cam.x=cx*TILE-W/2;cam.y=cy*TILE-H/2;
+  requestAnimationFrame(loop);
+}
+
+resize();
+document.getElementById('ov-title').textContent='⚔️ AoE Light';
+document.getElementById('ov-msg').textContent='Build, gather, and defend against enemy waves. Destroy their Town Center to win.';
+document.getElementById('ov-continue').style.display=hasSave()?'block':'none';
+overlay.style.display='flex';
+</script>
+</body>
+</html>
