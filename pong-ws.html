@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Multiplayer Pong</title>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  background: black;
+  overflow: hidden;
+  touch-action: none;
+}
+
+canvas { display: block; }
+
+#log {
+  display:none; /* hidden by default */
+  position:fixed;
+  bottom:0;
+  width:100%;
+  max-height:120px;
+  overflow:auto;
+  background:#111;
+  color:#0f0;
+  font-size:10px;
+}
+
+#modal {
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.9);
+  color:white;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  font-family:monospace;
+}
+
+input, button {
+  margin:5px;
+  padding:10px;
+  font-size:16px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="modal">
+  <div>Your ID:</div>
+  <div id="myId">...</div>
+
+  <input id="peerId" placeholder="Enter opponent ID">
+  <button onclick="connectPeer()">Connect</button>
+</div>
+
+<div id="log"></div>
+
+<script>
+// ===== LOG =====
+const logEl = document.getElementById("log");
+function log(...a){
+  const msg = a.map(x=>typeof x==="object"?JSON.stringify(x):x).join(" ");
+  logEl.innerHTML += msg+"<br>";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ===== WS =====
+const WS_URL = "wss://minds-amd-frames-heavy.trycloudflare.com";
+let ws = new WebSocket(WS_URL);
+
+let myId = null;
+let peer = null;
+let isHost = false;
+
+// wrap send
+function sendMessage(obj){
+  if(ws.readyState === 1){
+    ws.send(JSON.stringify({
+      type: "message",
+      text: JSON.stringify(obj)
+    }));
+  }
+}
+
+ws.onmessage = (e)=>{
+  const msg = JSON.parse(e.data);
+  log("WS:", msg);
+
+  // ===== ID =====
+  if(msg.type === "id"){
+    myId = msg.id;
+    document.getElementById("myId").innerText = myId;
+  }
+
+  // ===== CONNECTED =====
+  if(msg.type === "connected"){
+    peer = msg.with;
+
+    // first connector becomes host
+    isHost = true;
+
+    startGame();
+  }
+
+  // ===== GAME MESSAGES =====
+  if(msg.type === "message"){
+    let data;
+    try {
+      data = JSON.parse(msg.text);
+    } catch {
+      return;
+    }
+
+    if(data.type === "paddle"){
+      ai.x = data.x;
+    }
+
+    if(data.type === "ball" && !isHost){
+      ball = data.ball;
+    }
+  }
+
+  if(msg.type === "disconnected"){
+    alert("Peer disconnected");
+    location.reload();
+  }
+};
+
+// ===== CONNECT =====
+function connectPeer(){
+  const id = document.getElementById("peerId").value;
+  ws.send(JSON.stringify({
+    type:"connect",
+    target:id
+  }));
+}
+
+// ===== GAME =====
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let W,H;
+function resize(){
+  W = canvas.width = innerWidth;
+  H = canvas.height = innerHeight;
+}
+window.onresize=resize;
+resize();
+
+let started=false, paused=false;
+
+const paddle={width:120,height:12,margin:30};
+
+let player={x:W/2};
+let ai={x:W/2};
+
+let ball={x:W/2,y:H/2,vx:0,vy:0,speed:300};
+
+// INPUT
+canvas.addEventListener("touchstart", e=>{
+  movePlayer(e.touches[0].clientX);
+});
+canvas.addEventListener("touchmove", e=>{
+  movePlayer(e.touches[0].clientX);
+});
+
+function movePlayer(x){
+  player.x = clamp(x, paddle.width/2, W-paddle.width/2);
+}
+
+// START
+function startGame(){
+  document.getElementById("modal").style.display="none";
+  started=true;
+  resetBall();
+}
+
+function resetBall(){
+  paused=true;
+
+  ball.x=W/2;
+  ball.y=H/2;
+  ball.speed=300;
+
+  const angle=(Math.random()*Math.PI/3)-Math.PI/6;
+  const dir=Math.random()>0.5?1:-1;
+
+  ball.vx=Math.sin(angle);
+  ball.vy=Math.cos(angle)*dir;
+
+  setTimeout(()=>paused=false,800);
+}
+
+// UPDATE
+function update(dt){
+  if(!started || paused) return;
+
+  sendMessage({
+    type:"paddle",
+    x:player.x
+  });
+
+  if(isHost){
+    ball.x+=ball.vx*ball.speed*dt;
+    ball.y+=ball.vy*ball.speed*dt;
+
+    if(ball.x<0||ball.x>W) ball.vx*=-1;
+
+    if(ball.y>H-paddle.margin-paddle.height){
+      if(Math.abs(ball.x-player.x)<paddle.width/2){
+        hit(player.x,-1);
+      }
+    }
+
+    if(ball.y<paddle.margin+paddle.height){
+      if(Math.abs(ball.x-ai.x)<paddle.width/2){
+        hit(ai.x,1);
+      }
+    }
+
+    if(ball.y<0||ball.y>H){
+      resetBall();
+    }
+
+    sendMessage({
+      type:"ball",
+      ball
+    });
+  }
+}
+
+function hit(px,dir){
+  const offset=(ball.x-px)/(paddle.width/2);
+  const angle=offset*Math.PI/3;
+
+  ball.speed*=1.05;
+  ball.vx=Math.sin(angle);
+  ball.vy=Math.cos(angle)*dir;
+
+  if(navigator.vibrate) navigator.vibrate(10);
+}
+
+// DRAW
+function draw(){
+  ctx.fillStyle="black";
+  ctx.fillRect(0,0,W,H);
+
+  ctx.fillStyle="white";
+
+  ctx.setLineDash([10,10]);
+  ctx.beginPath();
+  ctx.moveTo(0,H/2);
+  ctx.lineTo(W,H/2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillRect(player.x-paddle.width/2,H-paddle.margin-paddle.height,paddle.width,paddle.height);
+  ctx.fillRect(ai.x-paddle.width/2,paddle.margin,paddle.width,paddle.height);
+
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,8,0,Math.PI*2);
+  ctx.fill();
+
+  if(!started){
+    ctx.font="20px monospace";
+    ctx.textAlign="center";
+    ctx.fillText("Waiting connection",W/2,H/2);
+  }
+}
+
+// LOOP
+let last=0;
+function loop(t){
+  const dt=(t-last)/1000;
+  last=t;
+
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// UTILS
+function clamp(v,min,max){
+  return Math.max(min,Math.min(max,v));
+}
+</script>
+
+</body>
+</html>
