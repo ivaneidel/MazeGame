@@ -19,8 +19,7 @@ html,body{
 #modal h2{font-size:22px;margin-bottom:8px;letter-spacing:2px;}
 #modal .id-box{
   background:#ffffff22;border:1px solid #fff4;
-  padding:10px 20px;border-radius:8px;font-size:22px;letter-spacing:4px;
-  font-weight:bold;
+  padding:10px 20px;border-radius:8px;font-size:22px;letter-spacing:4px;font-weight:bold;
 }
 #modal input{
   padding:10px 14px;font-size:18px;border-radius:8px;border:none;
@@ -31,13 +30,30 @@ html,body{
   background:#4caf50;color:white;cursor:pointer;font-weight:bold;
 }
 #modal .hint{font-size:12px;color:#aaa;margin-top:6px;}
+
 #game{display:none;flex-direction:column;height:100vh;gap:0;}
+
+/* ID bar */
+#idBar{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:4px 10px;background:#00000055;font-size:11px;color:#ffffffaa;
+}
+#idBar span{letter-spacing:1px;}
+#idBar .id-val{color:white;font-weight:bold;letter-spacing:2px;}
+
+/* Reconnect banner */
+#reconnectBanner{
+  display:none;text-align:center;padding:6px;font-size:12px;font-weight:bold;
+  background:#b7460088;letter-spacing:1px;
+}
+
 #turnBanner{
   text-align:center;padding:8px;font-size:13px;font-weight:bold;letter-spacing:1px;
-  background:#00000044;transition:background 0.3s;
+  background:#00000044;
 }
 #turnBanner.mine{background:#2e7d3288;}
 #turnBanner.theirs{background:#7d2e2e88;}
+
 #scoreboard{
   display:grid;grid-template-columns:1fr 1fr;
   background:#00000033;padding:6px 8px;gap:3px;
@@ -46,21 +62,22 @@ html,body{
 .score-col.active-player h3{color:#7eff8a;}
 .score-row{
   display:flex;justify-content:space-between;
-  font-size:11px;padding:3px 6px;border-radius:4px;
-  background:#ffffff0a;
+  font-size:11px;padding:3px 6px;border-radius:4px;background:#ffffff0a;
 }
 .score-row.clickable{background:#4caf5033;border:1px solid #4caf5077;cursor:pointer;}
-.score-row.clickable:hover{background:#4caf5055;}
+.score-row.clickable:active{background:#4caf5055;}
 .score-row.locked{color:#aaa;}
 .score-row.preview-val .val{color:#ffe57f;}
 .score-row.invalid{color:#555;background:#ffffff05;}
 .score-row .label{font-weight:bold;}
 .score-row .val{font-weight:bold;}
+
 #diceWrap{
   flex:1;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:14px;
 }
 #diceArea{display:flex;gap:14px;justify-content:center;align-items:center;}
+
 .die-wrap{width:58px;height:58px;perspective:200px;cursor:pointer;}
 .die-inner{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform 0.15s;}
 .die-wrap:active .die-inner{transform:scale(0.92);}
@@ -92,6 +109,7 @@ html,body{
 #rollBtn:disabled{opacity:0.35;cursor:default;transform:none;}
 #rollBtn:not(:disabled):active{transform:scale(0.96);}
 #rollInfo{font-size:12px;color:#aaa;text-align:center;}
+
 #winner{
   position:fixed;inset:0;background:#000d;
   display:none;align-items:center;justify-content:center;
@@ -111,6 +129,11 @@ html,body{
 </div>
 
 <div id="game">
+  <div id="idBar">
+    <span>You: <span class="id-val" id="idBarMe">—</span></span>
+    <span>Opponent: <span class="id-val" id="idBarOpp">—</span></span>
+  </div>
+  <div id="reconnectBanner">⚡ Reconnecting…</div>
   <div id="turnBanner">—</div>
   <div id="scoreboard"></div>
   <div id="diceWrap">
@@ -123,12 +146,109 @@ html,body{
 <div id="winner"></div>
 
 <script>
-const WS_URL="wss://britannica-trail-alleged-transition.trycloudflare.com";
-let ws=new WebSocket(WS_URL);
-let myId=null,peer=null,isHost=false,state=null;
+const WS_URL = "wss://mode-acdbentity-odds-findarticles.trycloudflare.com";
+
+let ws = null;
+let myId = null, peer = null, isHost = false, state = null;
+let reconnectTimer = null;
+let connected = false;
+
+// ── LOCALSTORAGE ──
+function savedId(){ return sessionStorage.getItem('generala_id'); }
+function saveId(id){ sessionStorage.setItem('generala_id', id); }
+
+// ── WS SETUP ──
+function connect(){
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    connected = true;
+    showReconnectBanner(false);
+    const old = savedId();
+    if(old){
+      // Try to resume under old ID
+      ws.send(JSON.stringify({type:'rejoin', id:old}));
+    }
+    // If no saved ID, server will assign one on first message
+  };
+
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+
+    if(msg.type === 'id'){
+      myId = msg.id;
+      saveId(myId);
+      document.getElementById('myId').innerText = myId;
+      document.getElementById('idBarMe').innerText = myId;
+    }
+
+    if(msg.type === 'connected'){
+      peer = msg.with;
+      document.getElementById('idBarOpp').innerText = peer;
+      if(myId < peer){
+        isHost = true;
+        state = initialState(peer);
+        state.scores[myId] = emptyScore();
+        state.scores[peer] = emptyScore();
+        send({type:'state', state});
+        startGame();
+      }
+    }
+
+    if(msg.type === 'reconnected'){
+      peer = msg.with;
+      isHost = myId < peer;
+      document.getElementById('idBarOpp').innerText = peer;
+      showReconnectBanner(false);
+      // Whoever still has state sends it — covers both "host reloaded" and "guest reloaded"
+      if(state) send({type:'state', state});
+      if(!document.getElementById('game').style.display ||
+         document.getElementById('game').style.display === 'none') return;
+      render();
+    }
+
+    if(msg.type === 'peer_disconnected'){
+      showReconnectBanner(true, '⚡ Opponent disconnected — waiting…');
+    }
+
+    if(msg.type === 'message'){
+      const data = JSON.parse(msg.text);
+      if(data.type === 'state'){
+        state = data.state;
+        if(!peer){
+          peer = Object.keys(state.scores).find(id => id !== myId);
+          document.getElementById('idBarOpp').innerText = peer;
+        }
+        const gameVisible = document.getElementById('game').style.display === 'flex';
+        if(!gameVisible) startGame();
+        else render();
+      }
+      if(data.type === 'action' && isHost) handle(data);
+    }
+  };
+
+  ws.onclose = () => {
+    connected = false;
+    if(document.getElementById('game').style.display === 'flex'){
+      showReconnectBanner(true);
+    }
+    // Retry every 3s
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function showReconnectBanner(show, msg='⚡ Reconnecting…'){
+  const b = document.getElementById('reconnectBanner');
+  b.style.display = show ? 'block' : 'none';
+  b.textContent = msg;
+}
 
 function send(obj){
-  ws.send(JSON.stringify({type:"message",text:JSON.stringify(obj)}));
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'message', text:JSON.stringify(obj)}));
+  }
 }
 
 // ── STATE ──
@@ -140,124 +260,80 @@ function initialState(firstTurn){
   return {turn:firstTurn,roll:0,dice:[1,1,1,1,1],held:[false,false,false,false,false],scores:{}};
 }
 
-// ── WS ──
-ws.onmessage=e=>{
-  const msg=JSON.parse(e.data);
-
-  if(msg.type==="id"){
-    myId=msg.id;
-    myIdEl.innerText=myId;
-  }
-
-  if(msg.type==="connected"){
-    peer=msg.with;
-    // Only the client with the lower ID becomes host.
-    // Both clients receive "connected", so we need exactly one to init state.
-    if(myId < peer){
-      isHost=true;
-      state=initialState(peer); // higher-ID (guest) goes first
-      state.scores[myId]=emptyScore();
-      state.scores[peer]=emptyScore();
-      send({type:"state",state});
-      start();
-    }
-    // The higher-ID client waits silently for the host's state message.
-  }
-
-  if(msg.type==="message"){
-    const data=JSON.parse(msg.text);
-    if(data.type==="state"){
-      state=data.state;
-      if(!peer){
-        // Safety net: derive peer from state in case "connected" was missed
-        peer=Object.keys(state.scores).find(id=>id!==myId);
-      }
-      const gameVisible=document.getElementById("game").style.display==="flex";
-      if(!gameVisible) start();
-      else render();
-    }
-    if(data.type==="action"&&isHost){
-      handle(data);
-    }
-  }
-};
-
 // ── ACTIONS ──
-function isMyTurn(){return state&&state.turn===myId;}
+function isMyTurn(){ return state && state.turn === myId; }
 
 function dispatch(obj){
   if(isHost) handle(obj);
-  else send({type:"action",...obj});
+  else send({type:'action', ...obj});
 }
 
 function roll(){
-  if(!isMyTurn()||state.roll>=3)return;
-  dispatch({action:"roll"});
+  if(!isMyTurn() || state.roll >= 3) return;
+  dispatch({action:'roll'});
 }
 function toggle(i){
-  if(!isMyTurn()||state.roll===0)return;
+  if(!isMyTurn() || state.roll === 0) return;
   if(!isHost){
-    // Optimistic update: flip locally so there's no visible lag
-    state.held[i]=!state.held[i];
+    state.held[i] = !state.held[i];
     render();
   }
-  dispatch({action:"toggle",i});
+  dispatch({action:'toggle', i});
 }
 function choose(cat){
-  if(!isMyTurn())return;
-  if(state.scores[myId][cat]!==null)return;
-  dispatch({action:"score",cat});
+  if(!isMyTurn()) return;
+  if(state.scores[myId][cat] !== null) return;
+  dispatch({action:'score', cat});
 }
 
 // ── HOST LOGIC ──
 function handle(a){
-  if(a.action==="roll"){
-    if(state.roll>=3)return;
-    for(let i=0;i<5;i++)if(!state.held[i])state.dice[i]=1+Math.random()*6|0;
+  if(a.action === 'roll'){
+    if(state.roll >= 3) return;
+    for(let i=0;i<5;i++) if(!state.held[i]) state.dice[i] = 1 + (Math.random()*6|0);
     state.roll++;
     sendState(true);
   }
-  if(a.action==="toggle"){
-    if(state.roll===0)return;
-    state.held[a.i]=!state.held[a.i];
+  if(a.action === 'toggle'){
+    if(state.roll === 0) return;
+    state.held[a.i] = !state.held[a.i];
     sendState();
   }
-  if(a.action==="score"){
-    const v=computeScore(a.cat,state);
-    state.scores[state.turn][a.cat]=v;
-    if(gameOver()){endGame();return;}
-    state.roll=0;
-    state.held=[false,false,false,false,false];
-    state.turn=state.turn===myId?peer:myId;
+  if(a.action === 'score'){
+    state.scores[state.turn][a.cat] = computeScore(a.cat, state);
+    if(gameOver()){ endGame(); return; }
+    state.roll = 0;
+    state.held = [false,false,false,false,false];
+    state.turn = state.turn === myId ? peer : myId;
     sendState();
   }
 }
 
-function sendState(anim=false){send({type:"state",state});render(anim);}
+function sendState(anim=false){ send({type:'state', state}); render(anim); }
 
 // ── SCORING ──
-function diceCount(dice,n){return dice.filter(x=>x===n).length;}
-function diceSum(dice,n){return dice.filter(x=>x===n).reduce((a,b)=>a+b,0);}
-function isStraight(dice){const s=[...dice].sort().join("");return s==="12345"||s==="23456";}
+function diceCount(d,n){ return d.filter(x=>x===n).length; }
+function diceSum(d,n){ return d.filter(x=>x===n).reduce((a,b)=>a+b,0); }
+function isStraight(d){ const s=[...d].sort().join(''); return s==='12345'||s==='23456'; }
 
 function computeScore(cat,st){
-  const d=st.dice,r=st.roll===1;
-  if(cat==="ones")return diceSum(d,1);
-  if(cat==="twos")return diceSum(d,2);
-  if(cat==="threes")return diceSum(d,3);
-  if(cat==="fours")return diceSum(d,4);
-  if(cat==="fives")return diceSum(d,5);
-  if(cat==="sixes")return diceSum(d,6);
-  if(cat==="escalera")return isStraight(d)?(r?25:20):0;
-  if(cat==="full"){
+  const d=st.dice, r=st.roll===1;
+  if(cat==='ones')    return diceSum(d,1);
+  if(cat==='twos')    return diceSum(d,2);
+  if(cat==='threes')  return diceSum(d,3);
+  if(cat==='fours')   return diceSum(d,4);
+  if(cat==='fives')   return diceSum(d,5);
+  if(cat==='sixes')   return diceSum(d,6);
+  if(cat==='escalera') return isStraight(d)?(r?25:20):0;
+  if(cat==='full'){
     const set=new Set(d);
-    if(set.size===2&&[...set].some(x=>diceCount(d,x)===3))return r?35:30;
+    if(set.size===2&&[...set].some(x=>diceCount(d,x)===3)) return r?35:30;
     return 0;
   }
-  if(cat==="poker")return d.some((_,__,a)=>diceCount(a,_)>=4)?(r?45:40):0;
-  if(cat==="generala")return new Set(d).size===1?(r?60:50):0;
-  if(cat==="doble"){
-    if(new Set(d).size===1&&st.scores[st.turn].generala!==null)return 100;
+  if(cat==='poker')    return d.some(v=>diceCount(d,v)>=4)?(r?45:40):0;
+  if(cat==='generala') return new Set(d).size===1?(r?60:50):0;
+  if(cat==='doble'){
+    if(new Set(d).size===1&&st.scores[st.turn].generala!==null) return 100;
     return 0;
   }
   return 0;
@@ -265,17 +341,17 @@ function computeScore(cat,st){
 
 function canScore(cat,st){
   const d=st.dice;
-  if(cat==="ones")return diceSum(d,1)>0;
-  if(cat==="twos")return diceSum(d,2)>0;
-  if(cat==="threes")return diceSum(d,3)>0;
-  if(cat==="fours")return diceSum(d,4)>0;
-  if(cat==="fives")return diceSum(d,5)>0;
-  if(cat==="sixes")return diceSum(d,6)>0;
-  if(cat==="escalera")return isStraight(d);
-  if(cat==="full"){const set=new Set(d);return set.size===2&&[...set].some(x=>diceCount(d,x)===3);}
-  if(cat==="poker")return d.some((_,__,a)=>diceCount(a,_)>=4);
-  if(cat==="generala")return new Set(d).size===1;
-  if(cat==="doble")return new Set(d).size===1&&st.scores[st.turn]?.generala!==null;
+  if(cat==='ones')    return diceSum(d,1)>0;
+  if(cat==='twos')    return diceSum(d,2)>0;
+  if(cat==='threes')  return diceSum(d,3)>0;
+  if(cat==='fours')   return diceSum(d,4)>0;
+  if(cat==='fives')   return diceSum(d,5)>0;
+  if(cat==='sixes')   return diceSum(d,6)>0;
+  if(cat==='escalera') return isStraight(d);
+  if(cat==='full'){const set=new Set(d); return set.size===2&&[...set].some(x=>diceCount(d,x)===3);}
+  if(cat==='poker')    return d.some(v=>diceCount(d,v)>=4);
+  if(cat==='generala') return new Set(d).size===1;
+  if(cat==='doble')    return new Set(d).size===1&&st.scores[st.turn]?.generala!==null;
   return false;
 }
 
@@ -284,24 +360,22 @@ function gameOver(){
   return Object.values(state.scores[myId]).every(v=>v!==null)&&
          Object.values(state.scores[peer]).every(v=>v!==null);
 }
-function total(id){return Object.values(state.scores[id]).reduce((a,b)=>a+(b||0),0);}
+function total(id){ return Object.values(state.scores[id]).reduce((a,b)=>a+(b||0),0); }
 function endGame(){
   const t1=total(myId),t2=total(peer);
-  const win=t1>t2?"🏆 YOU WIN!":t1<t2?"😔 YOU LOSE":"🤝 DRAW";
-  winner.innerHTML=`<div>${win}</div><div style="font-size:20px">${t1} – ${t2}</div>`;
-  winner.style.display="flex";
+  const win=t1>t2?'🏆 YOU WIN!':t1<t2?'😔 YOU LOSE':'🤝 DRAW';
+  document.getElementById('winner').innerHTML=
+    `<div>${win}</div><div style="font-size:20px">${t1} – ${t2}</div>`;
+  document.getElementById('winner').style.display='flex';
   sendState();
 }
 
 // ── RENDER ──
-const diceArea=document.getElementById("diceArea");
-const scoreboardEl=document.getElementById("scoreboard");
-const myIdEl=document.getElementById("myId");
-const winner=document.getElementById("winner");
-const rollBtn=document.getElementById("rollBtn");
-const turnBanner=document.getElementById("turnBanner");
-const rollInfo=document.getElementById("rollInfo");
-
+const CAT_LABELS={
+  ones:'Ones',twos:'Twos',threes:'Threes',fours:'Fours',fives:'Fives',sixes:'Sixes',
+  escalera:'Straight (20/25)',full:'Full House (30/35)',poker:'Four of a Kind (40/45)',
+  generala:'Generala (50/60)',doble:'Double Generala (100)'
+};
 const PIP_MAP={
   1:[[50,50]],
   2:[[22,22],[78,78]],
@@ -312,17 +386,17 @@ const PIP_MAP={
 };
 
 function buildDie(val,held,anim){
-  const wrap=document.createElement("div");
-  wrap.className="die-wrap"+(held?" held":"")+(anim?" rollAnim":"");
-  const inner=document.createElement("div");
-  inner.className="die-inner";
-  const face=document.createElement("div");
-  face.className="die-face";
+  const wrap=document.createElement('div');
+  wrap.className='die-wrap'+(held?' held':'')+(anim?' rollAnim':'');
+  const inner=document.createElement('div');
+  inner.className='die-inner';
+  const face=document.createElement('div');
+  face.className='die-face';
   PIP_MAP[val].forEach(([px,py])=>{
-    const p=document.createElement("div");
-    p.className="pip";
-    p.style.left=(px/100*58-4.5)+"px";
-    p.style.top=(py/100*58-4.5)+"px";
+    const p=document.createElement('div');
+    p.className='pip';
+    p.style.left=(px/100*58-4.5)+'px';
+    p.style.top=(py/100*58-4.5)+'px';
     face.appendChild(p);
   });
   inner.appendChild(face);
@@ -330,94 +404,95 @@ function buildDie(val,held,anim){
   return wrap;
 }
 
-const CAT_LABELS={
-  ones:"Ones",twos:"Twos",threes:"Threes",fours:"Fours",fives:"Fives",sixes:"Sixes",
-  escalera:"Straight (20/25)",full:"Full House (30/35)",poker:"Four of a Kind (40/45)",
-  generala:"Generala (50/60)",doble:"Double Generala (100)"
-};
-
 function render(anim=false){
-  if(!state||!peer)return;
-  const myTurn=isMyTurn();
-  const rolled=state.roll>0;
+  if(!state||!peer) return;
+  const myTurn=isMyTurn(), rolled=state.roll>0;
 
-  turnBanner.textContent=myTurn?"⬤ YOUR TURN":"⬤ OPPONENT'S TURN";
-  turnBanner.className=myTurn?"mine":"theirs";
+  const banner=document.getElementById('turnBanner');
+  banner.textContent=myTurn?'⬤ YOUR TURN':'⬤ OPPONENT\'S TURN';
+  banner.className=myTurn?'mine':'theirs';
 
-  diceArea.innerHTML="";
+  const diceArea=document.getElementById('diceArea');
+  diceArea.innerHTML='';
   state.dice.forEach((v,i)=>{
     const d=buildDie(v,state.held[i],anim&&!state.held[i]);
     if(myTurn&&rolled) d.onclick=()=>toggle(i);
     diceArea.appendChild(d);
   });
 
+  const rollBtn=document.getElementById('rollBtn');
+  const rollInfo=document.getElementById('rollInfo');
   rollBtn.disabled=!myTurn||state.roll>=3;
   rollBtn.textContent=`🎲 Roll (${state.roll}/3)`;
   rollInfo.textContent=rolled
-    ?(myTurn?"Tap dice to hold/unhold":"Waiting for opponent…")
-    :(myTurn?"Roll the dice to start your turn":"Waiting for opponent…");
+    ?(myTurn?'Tap dice to hold/unhold':'Waiting for opponent…')
+    :(myTurn?'Roll the dice to start your turn':'Waiting for opponent…');
 
-  scoreboardEl.innerHTML="";
+  const sb=document.getElementById('scoreboard');
+  sb.innerHTML='';
   [myId,peer].forEach(pid=>{
-    const col=document.createElement("div");
-    col.className="score-col"+(state.turn===pid?" active-player":"");
-    const h=document.createElement("h3");
-    h.textContent=(pid===myId?"You":"Opponent")+" · "+total(pid)+" pts";
+    const col=document.createElement('div');
+    col.className='score-col'+(state.turn===pid?' active-player':'');
+    const h=document.createElement('h3');
+    h.textContent=(pid===myId?'You':'Opponent')+' · '+total(pid)+' pts';
     col.appendChild(h);
 
     Object.keys(emptyScore()).forEach(cat=>{
-      const row=document.createElement("div");
-      row.className="score-row";
-      const val=state.scores[pid][cat];
-      const label=document.createElement("span");
-      label.className="label";
-      label.textContent=CAT_LABELS[cat];
-      const valEl=document.createElement("span");
-      valEl.className="val";
+      const row=document.createElement('div');
+      row.className='score-row';
+      const stored=state.scores[pid][cat];
+      const lbl=document.createElement('span');
+      lbl.className='label';
+      lbl.textContent=CAT_LABELS[cat];
+      const valEl=document.createElement('span');
+      valEl.className='val';
 
-      if(val!==null){
-        valEl.textContent=val;
-        row.classList.add("locked");
+      if(stored!==null){
+        valEl.textContent=stored;
+        row.classList.add('locked');
       } else if(pid===myId&&myTurn&&rolled){
-        const preview=computeScore(cat,state);
         const valid=canScore(cat,state);
         const mustBurn=state.roll===3;
         if(valid){
-          valEl.textContent="+"+preview;
-          row.classList.add("clickable","preview-val");
+          valEl.textContent='+'+computeScore(cat,state);
+          row.classList.add('clickable','preview-val');
           row.onclick=()=>choose(cat);
         } else if(mustBurn){
-          valEl.textContent="burn 0";
-          row.classList.add("clickable");
-          row.style.opacity="0.5";
+          valEl.textContent='burn 0';
+          row.classList.add('clickable');
+          row.style.opacity='0.5';
           row.onclick=()=>choose(cat);
         } else {
-          valEl.textContent="–";
-          row.classList.add("invalid");
+          valEl.textContent='–';
+          row.classList.add('invalid');
         }
       } else {
-        valEl.textContent="";
+        valEl.textContent='';
       }
 
-      row.appendChild(label);
+      row.appendChild(lbl);
       row.appendChild(valEl);
       col.appendChild(row);
     });
-
-    scoreboardEl.appendChild(col);
+    sb.appendChild(col);
   });
 }
 
 // ── START ──
-function start(){
-  document.getElementById("modal").style.display="none";
-  document.getElementById("game").style.display="flex";
+function startGame(){
+  document.getElementById('modal').style.display='none';
+  document.getElementById('game').style.display='flex';
+  document.getElementById('idBarMe').innerText=myId||'—';
+  document.getElementById('idBarOpp').innerText=peer||'—';
   render();
 }
 
 function connectPeer(){
-  ws.send(JSON.stringify({type:"connect",target:document.getElementById("peerId").value}));
+  ws.send(JSON.stringify({type:'connect', target:document.getElementById('peerId').value}));
 }
+
+// ── INIT ──
+connect();
 </script>
 </body>
 </html>
