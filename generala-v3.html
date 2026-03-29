@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Generala Multiplayer</title>
+<script src="https://ivaneidel.github.io/html-games/net/wssnet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  height:100%;background:#0b5d2a;
+  font-family:'Segoe UI',monospace;color:white;overflow:hidden;
+  user-select:none;-webkit-user-select:none;
+}
+#game{display:none;flex-direction:column;height:100vh;}
+#idBar{display:flex;justify-content:space-between;align-items:center;padding:4px 10px;background:#00000055;font-size:11px;color:#ffffffaa;}
+#idBar .id-val{color:white;font-weight:bold;letter-spacing:2px;}
+#reconnectBanner{display:none;text-align:center;padding:6px;font-size:12px;font-weight:bold;background:#b7460088;letter-spacing:1px;}
+#turnBanner{text-align:center;padding:8px;font-size:13px;font-weight:bold;letter-spacing:1px;background:#00000044;}
+#turnBanner.mine{background:#2e7d3288;}
+#turnBanner.theirs{background:#7d2e2e88;}
+#scoreboard{display:grid;grid-template-columns:1fr 1fr;background:#00000033;padding:6px 8px;gap:3px;}
+.score-col h3{font-size:11px;text-align:center;margin-bottom:4px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;}
+.score-col.active-player h3{color:#7eff8a;}
+.score-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 6px;border-radius:4px;background:#ffffff0a;}
+.score-row.clickable{background:#4caf5033;border:1px solid #4caf5077;cursor:pointer;}
+.score-row.clickable:active{background:#4caf5055;}
+.score-row.locked{color:#aaa;}
+.score-row.preview-val .val{color:#ffe57f;}
+.score-row.invalid{color:#555;background:#ffffff05;}
+.score-row .label{font-weight:bold;}
+.score-row .val{font-weight:bold;}
+#diceWrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;}
+#diceArea{display:flex;gap:14px;justify-content:center;align-items:center;}
+.die-wrap{width:58px;height:58px;perspective:200px;cursor:pointer;}
+.die-inner{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform 0.15s;}
+.die-wrap:active .die-inner{transform:scale(0.92);}
+.die-face{position:absolute;inset:0;background:linear-gradient(145deg,#fff 0%,#ddd 100%);border-radius:10px;box-shadow:inset -3px -3px 6px rgba(0,0,0,0.25),inset 2px 2px 5px rgba(255,255,255,0.8),3px 6px 14px rgba(0,0,0,0.5);}
+.die-wrap.held .die-face{background:linear-gradient(145deg,#ffe082,#ffb300);box-shadow:inset -3px -3px 6px rgba(0,0,0,0.2),inset 2px 2px 5px rgba(255,255,255,0.5),3px 6px 14px rgba(0,0,0,0.5),0 0 10px #ffb30066;}
+.pip{width:9px;height:9px;background:radial-gradient(circle at 35% 35%,#555,#000);border-radius:50%;position:absolute;}
+.rollAnim .die-inner{animation:rollAnim 0.35s ease;}
+@keyframes rollAnim{0%{transform:rotateX(0) rotateY(0);}40%{transform:rotateX(180deg) rotateY(90deg) scale(1.1);}100%{transform:rotateX(360deg) rotateY(360deg);}}
+#rollBtn{padding:12px 36px;font-size:17px;font-weight:bold;border-radius:50px;border:none;cursor:pointer;background:linear-gradient(145deg,#43a047,#1b5e20);color:white;letter-spacing:1px;box-shadow:0 4px 12px #0007;transition:opacity 0.2s,transform 0.1s;}
+#rollBtn:disabled{opacity:0.35;cursor:default;transform:none;}
+#rollBtn:not(:disabled):active{transform:scale(0.96);}
+#rollInfo{font-size:12px;color:#aaa;text-align:center;}
+#winner{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-size:28px;text-align:center;}
+/* debug log */
+#dbg{position:fixed;bottom:0;left:0;right:0;background:#000b;font-size:10px;padding:4px 6px;z-index:9999;max-height:120px;overflow-y:auto;pointer-events:none; display:none}
+</style>
+</head>
+<body>
+
+<div id="game">
+  <div id="idBar">
+    <span>You: <span class="id-val" id="idBarMe">—</span></span>
+    <span>Opponent: <span class="id-val" id="idBarOpp">—</span></span>
+  </div>
+  <div id="reconnectBanner">⚡ Reconnecting…</div>
+  <div id="turnBanner">—</div>
+  <div id="scoreboard"></div>
+  <div id="diceWrap">
+    <div id="diceArea"></div>
+    <div id="rollInfo"></div>
+    <button id="rollBtn" onclick="roll()" disabled>🎲 Roll (0/3)</button>
+  </div>
+</div>
+
+<div id="winner"></div>
+<div id="dbg"></div>
+
+<script>
+function dbg(msg){
+  const el=document.getElementById('dbg');
+  el.innerHTML+=msg+'<br>';
+  el.scrollTop=el.scrollHeight;
+}
+
+// ── GAME STATE ──
+let myId = null, peer = null, isHost = false, state = null;
+
+dbg('script start — wssnet_id in session: '+sessionStorage.getItem('wssnet_id'));
+
+function emptyScore(){
+  return {ones:null,twos:null,threes:null,fours:null,fives:null,sixes:null,
+    escalera:null,full:null,poker:null,generala:null,doble:null};
+}
+function initialState(firstTurn){
+  return {turn:firstTurn,roll:0,dice:[1,1,1,1,1],held:[false,false,false,false,false],scores:{}};
+}
+
+// ── WSSNET ──
+const net = new WSSNet({
+  onReady(id){
+    dbg('onReady: '+id+' | peer='+peer+' | pair modal in DOM: '+!!document.getElementById('wssnet-pair-modal'));
+    myId = id;
+    document.getElementById('idBarMe').innerText = id;
+  },
+
+  onPaired(id, peerId){
+    dbg('onPaired: me='+id+' peer='+peerId);
+    myId = id;
+    peer = peerId;
+    isHost = myId < peer;
+    document.getElementById('idBarOpp').innerText = peer;
+    if(isHost){
+      state = initialState(peer);
+      state.scores[myId] = emptyScore();
+      state.scores[peer]  = emptyScore();
+      net.send({type:'state', state});
+    }
+    net.mountMenu();
+    startGame();
+  },
+
+  onMessage(data){
+    if(data.type === 'state'){
+      dbg('onMessage:state | peer='+peer);
+      state = data.state;
+      if(!peer) peer = Object.keys(state.scores).find(id => id !== myId);
+      if(document.getElementById('game').style.display !== 'flex') startGame();
+      else render();
+    }
+    if(data.type === 'action' && isHost) handle(data);
+  },
+
+  onReconnected(peerId){
+    dbg('onReconnected: peer='+peerId);
+    peer = peerId;
+    isHost = myId < peer;
+    document.getElementById('idBarOpp').innerText = peer;
+    showReconnectBanner(false);
+    if(state) net.send({type:'state', state});
+    if(document.getElementById('game').style.display === 'flex') render();
+  },
+
+  onPeerDisconnected(){
+    dbg('onPeerDisconnected');
+    showReconnectBanner(true, '⚡ Opponent disconnected — waiting…');
+  },
+});
+
+dbg('calling mountServerModal...');
+net.mountServerModal();
+dbg('calling mountPairModal...');
+net.mountPairModal();
+dbg('pair modal in DOM after mount: '+!!document.getElementById('wssnet-pair-modal'));
+dbg('pair modal display: '+(document.getElementById('wssnet-pair-modal')?.style.display));
+
+// ── RECONNECT BANNER ──
+function showReconnectBanner(show, msg='⚡ Reconnecting…'){
+  const b = document.getElementById('reconnectBanner');
+  b.style.display = show ? 'block' : 'none';
+  b.textContent = msg;
+}
+
+// ── ACTIONS ──
+function isMyTurn(){ return state && state.turn === myId; }
+function dispatch(obj){
+  if(isHost) handle(obj);
+  else net.send({type:'action', ...obj});
+}
+function roll(){
+  if(!isMyTurn() || state.roll >= 3) return;
+  dispatch({action:'roll'});
+}
+function toggle(i){
+  if(!isMyTurn() || state.roll === 0) return;
+  if(!isHost){ state.held[i] = !state.held[i]; render(); }
+  dispatch({action:'toggle', i});
+}
+function choose(cat){
+  if(!isMyTurn() || state.scores[myId][cat] !== null) return;
+  dispatch({action:'score', cat});
+}
+
+// ── HOST LOGIC ──
+function handle(a){
+  if(a.action === 'roll'){
+    if(state.roll >= 3) return;
+    for(let i=0;i<5;i++) if(!state.held[i]) state.dice[i] = 1+(Math.random()*6|0);
+    state.roll++;
+    sendState(true);
+  }
+  if(a.action === 'toggle'){
+    if(state.roll === 0) return;
+    state.held[a.i] = !state.held[a.i];
+    sendState();
+  }
+  if(a.action === 'score'){
+    state.scores[state.turn][a.cat] = computeScore(a.cat, state);
+    if(gameOver()){ endGame(); return; }
+    state.roll = 0;
+    state.held = [false,false,false,false,false];
+    state.turn = state.turn === myId ? peer : myId;
+    sendState();
+  }
+}
+function sendState(anim=false){ net.send({type:'state', state}); render(anim); }
+
+// ── SCORING ──
+function diceCount(d,n){ return d.filter(x=>x===n).length; }
+function diceSum(d,n){ return d.filter(x=>x===n).reduce((a,b)=>a+b,0); }
+function isStraight(d){ const s=[...d].sort().join(''); return s==='12345'||s==='23456'; }
+function computeScore(cat,st){
+  const d=st.dice, r=st.roll===1;
+  if(cat==='ones')    return diceSum(d,1);
+  if(cat==='twos')    return diceSum(d,2);
+  if(cat==='threes')  return diceSum(d,3);
+  if(cat==='fours')   return diceSum(d,4);
+  if(cat==='fives')   return diceSum(d,5);
+  if(cat==='sixes')   return diceSum(d,6);
+  if(cat==='escalera') return isStraight(d)?(r?25:20):0;
+  if(cat==='full'){
+    const set=new Set(d);
+    if(set.size===2&&[...set].some(x=>diceCount(d,x)===3)) return r?35:30;
+    return 0;
+  }
+  if(cat==='poker')    return d.some(v=>diceCount(d,v)>=4)?(r?45:40):0;
+  if(cat==='generala') return new Set(d).size===1?(r?60:50):0;
+  if(cat==='doble'){
+    if(new Set(d).size===1&&st.scores[st.turn].generala!==null) return 100;
+    return 0;
+  }
+  return 0;
+}
+function canScore(cat,st){
+  const d=st.dice;
+  if(cat==='ones')    return diceSum(d,1)>0;
+  if(cat==='twos')    return diceSum(d,2)>0;
+  if(cat==='threes')  return diceSum(d,3)>0;
+  if(cat==='fours')   return diceSum(d,4)>0;
+  if(cat==='fives')   return diceSum(d,5)>0;
+  if(cat==='sixes')   return diceSum(d,6)>0;
+  if(cat==='escalera') return isStraight(d);
+  if(cat==='full'){ const set=new Set(d); return set.size===2&&[...set].some(x=>diceCount(d,x)===3); }
+  if(cat==='poker')    return d.some(v=>diceCount(d,v)>=4);
+  if(cat==='generala') return new Set(d).size===1;
+  if(cat==='doble')    return new Set(d).size===1&&st.scores[st.turn]?.generala!==null;
+  return false;
+}
+
+// ── GAME OVER ──
+function gameOver(){
+  return Object.values(state.scores[myId]).every(v=>v!==null)&&
+         Object.values(state.scores[peer]).every(v=>v!==null);
+}
+function total(id){ return Object.values(state.scores[id]).reduce((a,b)=>a+(b||0),0); }
+function endGame(){
+  state.over = { scores:{ [myId]:total(myId), [peer]:total(peer) } };
+  sendState();
+}
+
+// ── RENDER ──
+const CAT_LABELS={
+  ones:'Ones',twos:'Twos',threes:'Threes',fours:'Fours',fives:'Fives',sixes:'Sixes',
+  escalera:'Straight (20/25)',full:'Full House (30/35)',poker:'Four of a Kind (40/45)',
+  generala:'Generala (50/60)',doble:'Double Generala (100)'
+};
+const PIP_MAP={
+  1:[[50,50]],2:[[22,22],[78,78]],3:[[22,22],[50,50],[78,78]],
+  4:[[22,22],[78,22],[22,78],[78,78]],5:[[22,22],[78,22],[50,50],[22,78],[78,78]],
+  6:[[22,22],[78,22],[22,50],[78,50],[22,78],[78,78]]
+};
+function buildDie(val,held,anim){
+  const wrap=document.createElement('div');
+  wrap.className='die-wrap'+(held?' held':'')+(anim?' rollAnim':'');
+  const inner=document.createElement('div'); inner.className='die-inner';
+  const face=document.createElement('div'); face.className='die-face';
+  PIP_MAP[val].forEach(([px,py])=>{
+    const p=document.createElement('div'); p.className='pip';
+    p.style.left=(px/100*58-4.5)+'px'; p.style.top=(py/100*58-4.5)+'px';
+    face.appendChild(p);
+  });
+  inner.appendChild(face); wrap.appendChild(inner);
+  return wrap;
+}
+function render(anim=false){
+  if(!state||!peer) return;
+  const winnerEl=document.getElementById('winner');
+  if(state.over){
+    const t1=state.over.scores[myId]??0, t2=state.over.scores[peer]??0;
+    const msg=t1>t2?'🏆 YOU WIN!':t1<t2?'😔 YOU LOSE':'🤝 DRAW';
+    winnerEl.innerHTML=`<div>${msg}</div><div style="font-size:20px">${t1} – ${t2}</div>`;
+    winnerEl.style.display='flex'; return;
+  }
+  winnerEl.style.display='none';
+  const myTurn=isMyTurn(), rolled=state.roll>0;
+  const turnsLeft=Object.values(state.scores[state.turn]).filter(v=>v===null).length;
+  const banner=document.getElementById('turnBanner');
+  banner.textContent=(myTurn?'⬤ YOUR TURN':'⬤ OPPONENT\'S TURN')+`  ·  ${turnsLeft} left`;
+  banner.className=myTurn?'mine':'theirs';
+  const diceArea=document.getElementById('diceArea');
+  diceArea.innerHTML='';
+  state.dice.forEach((v,i)=>{
+    const d=buildDie(v,state.held[i],anim&&!state.held[i]);
+    if(myTurn&&rolled) d.onclick=()=>toggle(i);
+    diceArea.appendChild(d);
+  });
+  const rollBtn=document.getElementById('rollBtn');
+  rollBtn.disabled=!myTurn||state.roll>=3;
+  rollBtn.textContent=`🎲 Roll (${state.roll}/3)`;
+  document.getElementById('rollInfo').textContent=rolled
+    ?(myTurn?'Tap dice to hold/unhold':'Waiting for opponent…')
+    :(myTurn?'Roll the dice to start your turn':'Waiting for opponent…');
+  const sb=document.getElementById('scoreboard');
+  sb.innerHTML='';
+  [myId,peer].forEach(pid=>{
+    const col=document.createElement('div');
+    col.className='score-col'+(state.turn===pid?' active-player':'');
+    const h=document.createElement('h3');
+    h.textContent=(pid===myId?'You':'Opponent')+' · '+total(pid)+' pts';
+    col.appendChild(h);
+    Object.keys(emptyScore()).forEach(cat=>{
+      const row=document.createElement('div'); row.className='score-row';
+      const stored=state.scores[pid][cat];
+      const lbl=document.createElement('span'); lbl.className='label'; lbl.textContent=CAT_LABELS[cat];
+      const valEl=document.createElement('span'); valEl.className='val';
+      if(stored!==null){
+        valEl.textContent=stored; row.classList.add('locked');
+      } else if(pid===myId&&myTurn&&rolled){
+        const valid=canScore(cat,state), mustBurn=state.roll===3;
+        if(valid){
+          valEl.textContent='+'+computeScore(cat,state);
+          row.classList.add('clickable','preview-val'); row.onclick=()=>choose(cat);
+        } else if(mustBurn){
+          valEl.textContent='burn 0'; row.classList.add('clickable');
+          row.style.opacity='0.5'; row.onclick=()=>choose(cat);
+        } else { valEl.textContent='–'; row.classList.add('invalid'); }
+      }
+      row.appendChild(lbl); row.appendChild(valEl); col.appendChild(row);
+    });
+    sb.appendChild(col);
+  });
+}
+function startGame(){
+  dbg('startGame: myId='+myId+' peer='+peer);
+  document.getElementById('game').style.display='flex';
+  document.getElementById('idBarMe').innerText = myId||'—';
+  document.getElementById('idBarOpp').innerText = peer||'—';
+  render();
+}
+</script>
+</body>
+</html>
