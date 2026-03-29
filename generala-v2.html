@@ -9,6 +9,7 @@
 html,body{
   height:100%;background:#0b5d2a;
   font-family:'Segoe UI',monospace;color:white;overflow:hidden;
+  user-select:none;-webkit-user-select:none;
 }
 
 /* ── MODAL ── */
@@ -172,7 +173,7 @@ html,body{
 <div id="winner"></div>
 
 <script>
-const WS_URL="wss://minds-amd-frames-heavy.trycloudflare.com";
+const WS_URL="wss://britannica-trail-alleged-transition.trycloudflare.com";
 let ws=new WebSocket(WS_URL);
 let myId=null,peer=null,isHost=false,state=null;
 
@@ -199,11 +200,20 @@ ws.onmessage=e=>{
     state.turn=myId;
     state.scores[myId]=emptyScore();
     state.scores[peer]=emptyScore();
-    sendState();start();
+    send({type:"state",state}); // broadcast to guest
+    start(); // host renders locally
   }
   if(msg.type==="message"){
     const data=JSON.parse(msg.text);
-    if(data.type==="state"){state=data.state;render();}
+    if(data.type==="state"){
+      // guest learns peer id from first state message
+      if(!peer){
+        const ids=Object.keys(data.state.scores);
+        peer=ids.find(id=>id!==myId);
+        start();
+      }
+      state=data.state;render();
+    }
     if(data.type==="action"&&isHost){handle(data);}
   }
 };
