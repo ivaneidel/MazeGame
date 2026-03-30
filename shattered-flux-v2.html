@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Shattered Flux</title>
+<script src="https://ivaneidel.github.io/html-games/net/wssnet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+:root{
+  --bg:#0d0d1a;--panel:#13132a;--panel2:#1a1a35;--border:#2a2a4a;
+  --ember:#e05a2b;--verdant:#4caf50;--aether:#7c6fff;--stone:#c09050;--neutral:#888;
+  --flux:#e74c3c;--focus:#3498db;--disruption:#e67e22;
+  --text:#ddd;--dim:#666;--card-bg:#1a1a35;
+  --wssnet-accent:#7c6fff;--wssnet-card-bg:#13132a;
+}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;font-size:13px;display:flex;flex-direction:column}
+
+/* MODE SELECT */
+#mode-overlay{position:fixed;inset:0;background:#000d;z-index:8000;display:flex;align-items:center;justify-content:center}
+#mode-box{background:#13132a;border:1px solid #7c6fff;border-radius:16px;padding:32px 28px;width:min(320px,90vw);display:flex;flex-direction:column;align-items:center;gap:14px}
+#mode-box h1{font-size:22px;letter-spacing:2px;color:var(--aether)}
+#mode-box p{font-size:12px;color:var(--dim);text-align:center}
+.mode-btn{width:100%;padding:14px;border-radius:10px;border:none;font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer}
+.mode-btn.sp{background:var(--aether);color:#fff}
+.mode-btn.mp{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+
+/* WAITING STRIP — slim, non-blocking */
+#waiting-strip{display:none;background:#1a1a0a;border-bottom:2px solid var(--disruption);padding:5px 12px;flex-shrink:0;align-items:center;justify-content:space-between;gap:8px}
+#waiting-strip.show{display:flex}
+#waiting-strip span{font-size:11px;color:var(--disruption);font-weight:700;letter-spacing:.5px}
+#waiting-strip small{font-size:10px;color:var(--dim)}
+
+/* HEADER */
+#hdr{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;gap:8px}
+#hdr h1{font-size:13px;letter-spacing:2px;color:var(--aether);white-space:nowrap}
+.hdr-right{display:flex;align-items:center;gap:8px}
+#turn-badge{font-size:11px;color:var(--dim);white-space:nowrap}
+#log-btn{background:none;border:1px solid var(--border);color:var(--dim);border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer}
+#fs-btn{background:none;border:1px solid var(--border);color:var(--dim);border-radius:6px;padding:3px 8px;font-size:13px;cursor:pointer}
+
+/* OPPONENT ZONE */
+#ai-zone{flex-shrink:0;background:var(--panel);border-bottom:1px solid var(--border);padding:6px 12px}
+.zone-header{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.zone-name{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--dim);text-transform:uppercase}
+.flux-wrap{display:flex;align-items:center;gap:6px;flex:1}
+.flux-track{flex:1;background:#1a0a0a;border-radius:4px;height:7px;overflow:hidden}
+.flux-fill{height:100%;background:var(--flux);border-radius:4px;transition:width .4s}
+.flux-num{font-size:12px;font-weight:700;color:var(--flux);min-width:28px;text-align:right}
+.deck-info{display:flex;gap:6px;font-size:10px;color:var(--dim)}
+.deck-info span{background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:1px 6px}
+.persistent-row{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;min-height:4px}
+.mini-card{background:var(--panel2);border:1px solid var(--border);border-radius:5px;padding:3px 6px;font-size:10px;display:flex;align-items:center;gap:3px}
+
+/* MAIN PANEL */
+#panel-main{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+#panel-main::-webkit-scrollbar{width:3px}
+#panel-main::-webkit-scrollbar-thumb{background:var(--border)}
+.section-label{font-size:10px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;padding:0 2px}
+.cards-row{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.cards-row::-webkit-scrollbar{height:3px}
+.cards-row::-webkit-scrollbar-thumb{background:var(--border)}
+
+/* CARDS */
+.card{min-width:100px;width:100px;background:var(--card-bg);border:1px solid var(--border);border-radius:9px;padding:8px 7px 7px;flex-shrink:0;display:flex;flex-direction:column;gap:2px;position:relative;transition:transform .12s,border-color .12s,opacity .2s}
+.card.tappable{cursor:pointer;border-color:#383860}
+.card.tappable:active{transform:scale(.94)}
+.card.played{opacity:.35;border-color:var(--border)}
+.card.locked{opacity:.35;border-color:var(--border);pointer-events:none}
+.card.buyable{border-color:#2a4a2a;cursor:pointer}
+.card.buyable:active{transform:scale(.94)}
+.card.no-focus{opacity:.4;pointer-events:none}
+.card.fragment-type{border-color:#4a3a8a}
+.card.structure-type{border-color:#5a4020}
+.c-faction{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:1px}
+.c-name{font-weight:700;font-size:12px;line-height:1.2}
+.c-cost{position:absolute;top:6px;right:7px;font-weight:700;font-size:13px;color:var(--focus)}
+.c-body{font-size:10px;color:#aaa;line-height:1.45;flex:1}
+.c-combo{font-size:9px;color:#666;margin-top:3px;font-style:italic;border-top:1px solid #222;padding-top:3px}
+.c-tag{display:inline-block;font-size:8px;padding:1px 5px;border-radius:3px;margin-top:3px;font-weight:700;letter-spacing:.5px}
+.tag-fragment{background:#2a1a5a;color:var(--aether)}
+.tag-structure{background:#2a1a0a;color:var(--stone)}
+.tag-action{background:#1a1a2a;color:#666}
+.fc-ember{color:var(--ember)}.fc-verdant{color:var(--verdant)}.fc-aether{color:var(--aether)}.fc-stone{color:var(--stone)}.fc-neutral{color:var(--neutral)}
+
+/* PLAYER BAR */
+#player-bar{flex-shrink:0;background:var(--panel);border-top:1px solid var(--border);padding:7px 12px;display:flex;align-items:center;gap:8px}
+.stat-pill{display:flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:3px 9px}
+.stat-pill .lbl{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+.stat-pill .val{font-size:15px;font-weight:700}
+.pill-focus .val{color:var(--focus)}.pill-disrupt .val{color:var(--disruption)}.pill-flux .val{color:var(--flux)}
+.pill-flux{flex:1}
+#end-btn{background:var(--aether);color:#fff;border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+#end-btn:disabled{background:#2a2a4a;color:#555;cursor:default}
+
+/* LOG */
+#live-log{flex-shrink:0;padding:3px 12px;font-size:10px;color:var(--dim);background:#0a0a14;border-top:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+#log-drawer{position:fixed;bottom:0;left:0;right:0;background:#0a0a18;border-top:2px solid var(--aether);z-index:50;transform:translateY(100%);transition:transform .25s;max-height:45vh;display:flex;flex-direction:column}
+#log-drawer.open{transform:translateY(0)}
+#log-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+#log-head span{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--aether)}
+#log-close{background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:0 4px}
+#log-list{overflow-y:auto;padding:8px 12px;flex:1;font-size:11px;line-height:1.9;color:#bbb}
+#log-list::-webkit-scrollbar{width:3px}
+#log-list::-webkit-scrollbar-thumb{background:var(--border)}
+
+/* MODAL */
+#modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;display:none;align-items:flex-end;justify-content:center}
+#modal-ov.show{display:flex}
+#modal-box{background:#14142e;border:1px solid var(--aether);border-radius:14px 14px 0 0;padding:18px;width:100%;max-width:420px}
+#modal-box h2{font-size:15px;margin-bottom:6px}
+#modal-box p{font-size:11px;color:#aaa;margin-bottom:10px}
+.modal-cards{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px}
+.modal-cards::-webkit-scrollbar{height:3px}
+.modal-cards::-webkit-scrollbar-thumb{background:var(--border)}
+.modal-card-sel{border-color:var(--aether)!important;cursor:pointer}
+.modal-card-sel:active{transform:scale(.94)}
+.modal-btns{display:flex;gap:8px}
+.m-btn{flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px;cursor:pointer}
+.m-btn.primary{background:var(--aether);border-color:var(--aether);font-weight:700}
+
+/* GAME OVER */
+#go{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px}
+#go.show{display:flex}
+#go h1{font-size:30px}
+#go p{color:var(--dim);font-size:13px;text-align:center;padding:0 24px}
+#go button{background:var(--aether);color:#fff;border:none;border-radius:10px;padding:12px 32px;font-size:15px;cursor:pointer;margin-top:8px}
+</style>
+</head>
+<body>
+
+<!-- MODE SELECT -->
+<div id="mode-overlay">
+  <div id="mode-box">
+    <h1>⚗️ SHATTERED FLUX</h1>
+    <p>Choose your game mode</p>
+    <button class="mode-btn sp" onclick="startSP()">⚔️ Single Player</button>
+    <button class="mode-btn mp" onclick="startMP()">🌐 Multiplayer</button>
+  </div>
+</div>
+
+<!-- WAITING STRIP -->
+<div id="waiting-strip">
+  <span>⏳ OPPONENT'S TURN</span>
+  <small id="waiting-sub">Waiting…</small>
+</div>
+
+<!-- HEADER -->
+<div id="hdr">
+  <h1>⚗️ SHATTERED FLUX</h1>
+  <div class="hdr-right">
+    <span id="turn-badge">Turn 1</span>
+    <button id="log-btn" onclick="toggleLog()">📋 Log</button>
+    <button id="fs-btn" onclick="toggleFS()">⛶</button>
+  </div>
+</div>
+
+<!-- OPPONENT ZONE -->
+<div id="ai-zone">
+  <div class="zone-header">
+    <span class="zone-name" id="opp-label">🤖 AI</span>
+    <div class="flux-wrap">
+      <div class="flux-track"><div class="flux-fill" id="ai-flux-fill" style="width:100%"></div></div>
+      <span class="flux-num" id="ai-flux-num">45</span>
+    </div>
+    <div class="deck-info">
+      <span id="ai-deck-ct">🂠 11</span>
+      <span id="ai-disc-ct">♻ 0</span>
+      <span id="ai-hand-ct">🤚 5</span>
+    </div>
+  </div>
+  <div class="persistent-row" id="ai-persistent"></div>
+</div>
+
+<!-- MAIN PANEL -->
+<div id="panel-main">
+  <div class="section-label">🛒 Market <span style="font-weight:normal;color:var(--dim)" id="mkt-left"></span></div>
+  <div class="cards-row" id="market-row"></div>
+  <div class="section-label" style="margin-top:6px">▶ Your Hand</div>
+  <div class="cards-row" id="hand-row"></div>
+  <div class="section-label" style="margin-top:6px">🔷 In Play</div>
+  <div class="cards-row" id="player-persistent"></div>
+  <div style="margin-top:4px;display:flex;gap:8px;font-size:10px;color:var(--dim)">
+    <span id="p-deck-ct">🂠 Deck: 6</span>
+    <span id="p-disc-ct">♻ Discard: 0</span>
+  </div>
+</div>
+
+<!-- PLAYER BAR -->
+<div id="player-bar">
+  <div class="stat-pill pill-flux">
+    <div><div class="lbl">FLUX</div><div class="val" id="p-flux">45</div></div>
+    <div style="flex:1;margin-left:6px"><div class="flux-track" style="height:5px"><div class="flux-fill" id="p-flux-fill" style="width:100%"></div></div></div>
+  </div>
+  <div class="stat-pill pill-focus"><div><div class="lbl">FOCUS</div><div class="val" id="p-focus">0</div></div></div>
+  <div class="stat-pill pill-disrupt"><div><div class="lbl">DISRUPT</div><div class="val" id="p-disrupt">0</div></div></div>
+  <button id="end-btn" onclick="endPlayerTurn()">End Turn ⚔️</button>
+</div>
+
+<div id="live-log" onclick="toggleLog()">Tap for full log…</div>
+
+<!-- LOG DRAWER -->
+<div id="log-drawer">
+  <div id="log-head"><span>📋 GAME LOG</span><button id="log-close" onclick="toggleLog()">✕</button></div>
+  <div id="log-list"></div>
+</div>
+
+<!-- MODAL -->
+<div id="modal-ov">
+  <div id="modal-box">
+    <h2 id="m-title"></h2>
+    <p id="m-desc"></p>
+    <div class="modal-cards" id="m-cards"></div>
+    <div class="modal-btns" id="m-btns"></div>
+  </div>
+</div>
+
+<!-- GAME OVER -->
+<div id="go">
+  <h1 id="go-title"></h1>
+  <p id="go-sub"></p>
+  <button onclick="location.reload()">Play Again</button>
+</div>
+
+<script>
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const FI={ember:'🔥',verdant:'🌿',aether:'🌪️',stone:'🪨',neutral:'⚪'};
+const FC={ember:'fc-ember',verdant:'fc-verdant',aether:'fc-aether',stone:'fc-stone',neutral:'fc-neutral'};
+const TI={action:'⚡',fragment:'🔷',structure:'🏛️'};
+function shuffle(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
+function opp(w){return w==='player'?'ai':'player'}
+
+// ── CARD DEFS ─────────────────────────────────────────────────────────────────
+const MARKET=[
+  {id:'spark_raider',name:'Spark Raider',f:'ember',t:'action',cost:2,text:'+2 Disruption',combo:'+1 Disruption',
+    play(S,w){addD(S,w,2)},cx(S,w){addD(S,w,1)}},
+  {id:'overheat_channel',name:'Overheat Channel',f:'ember',t:'action',cost:4,text:'+4 Disruption · Lose 2 Flux',combo:'Draw 1',
+    play(S,w){addD(S,w,4);loseF(S,w,2)},cx(S,w){draw(S,w,1)}},
+  {id:'cinder_fragment',name:'Cinder Fragment',f:'ember',t:'fragment',cost:5,text:'Passive: +1 Disruption/turn · End: Lose 1 Flux',combo:'+1 Disruption',
+    play(S,w){},cx(S,w){addD(S,w,1)},pass(S,w){addD(S,w,1)},eot(S,w){loseF(S,w,1)}},
+  {id:'flash_surge',name:'Flash Surge',f:'ember',t:'action',cost:3,text:'+2 Disruption · May lose 1 Flux → Draw 1',combo:'+1 Disruption',
+    play(S,w,cb){addD(S,w,2);mayLoseDraw(S,w,cb)},cx(S,w){addD(S,w,1)}},
+  {id:'scorch_loop',name:'Scorch Loop',f:'ember',t:'action',cost:6,text:'+3 Disruption · May scrap from hand → +2 Disruption',combo:'Opp −1 Flux',
+    play(S,w,cb){addD(S,w,3);mayScrapHand4D(S,w,cb)},cx(S,w){loseF(S,opp(w),1)}},
+  {id:'bloom_initiate',name:'Bloom Initiate',f:'verdant',t:'action',cost:2,text:'+2 Flux',combo:'+1 Flux',
+    play(S,w){gainF(S,w,2)},cx(S,w){gainF(S,w,1)}},
+  {id:'root_network',name:'Root Network',f:'verdant',t:'fragment',cost:4,text:'Passive: +1 Flux/turn',combo:'+1 Focus',
+    play(S,w){},cx(S,w){addFoc(S,w,1)},pass(S,w){gainF(S,w,1)}},
+  {id:'verdant_convergence',name:'Verdant Convergence',f:'verdant',t:'action',cost:6,text:'+3 Flux · 2+ Frags → Draw 1',combo:'+1 Flux',
+    play(S,w){gainF(S,w,3);if(S[w].frags.length>=2)draw(S,w,1)},cx(S,w){gainF(S,w,1)}},
+  {id:'spreading_canopy',name:'Spreading Canopy',f:'verdant',t:'action',cost:3,text:'+1 Flux · Frag → +1 Focus',combo:'+1 Flux',
+    play(S,w){gainF(S,w,1);if(S[w].frags.length>0)addFoc(S,w,1)},cx(S,w){gainF(S,w,1)}},
+  {id:'living_core',name:'Living Core',f:'verdant',t:'fragment',cost:6,text:'Passive: +1 Flux/turn · 3+ Frags → +1 Disruption/turn',combo:'+1 Flux',
+    play(S,w){},cx(S,w){gainF(S,w,1)},pass(S,w){gainF(S,w,1);if(S[w].frags.length>=3)addD(S,w,1)}},
+  {id:'phase_insight',name:'Phase Insight',f:'aether',t:'action',cost:3,text:'Draw 2',combo:'+1 Disruption',
+    play(S,w){draw(S,w,2)},cx(S,w){addD(S,w,1)}},
+  {id:'flux_drift',name:'Flux Drift',f:'aether',t:'action',cost:4,text:'Draw 1 · May scrap from hand',combo:'Draw 1',
+    play(S,w,cb){draw(S,w,1);mayScrapHand(S,w,cb)},cx(S,w){draw(S,w,1)}},
+  {id:'echo_fragment',name:'Echo Fragment',f:'aether',t:'fragment',cost:5,text:'Passive: First Action/turn triggers twice',combo:'Draw 1',
+    play(S,w){},cx(S,w){draw(S,w,1)}},
+  {id:'temporal_glitch',name:'Temporal Glitch',f:'aether',t:'action',cost:3,text:'Draw 1 · Return card from discard',combo:'Draw 1',
+    play(S,w,cb){draw(S,w,1);pickFromDiscard(S,w,cb)},cx(S,w){draw(S,w,1)}},
+  {id:'phase_collapse',name:'Phase Collapse',f:'aether',t:'action',cost:6,text:'+2 Disruption · Opp discards 1',combo:'Draw 1',
+    play(S,w){addD(S,w,2);oppDiscardRnd(S,w)},cx(S,w){draw(S,w,1)}},
+  {id:'core_miner',name:'Core Miner',f:'stone',t:'action',cost:2,text:'+2 Focus',combo:'+1 Focus',
+    play(S,w){addFoc(S,w,2)},cx(S,w){addFoc(S,w,1)}},
+  {id:'foundation_node',name:'Foundation Node',f:'stone',t:'structure',cost:4,text:'Passive: +1 Focus/turn',combo:'+1 Flux',
+    play(S,w){},cx(S,w){gainF(S,w,1)},pass(S,w){addFoc(S,w,1)}},
+  {id:'load_distributor',name:'Load Distributor',f:'stone',t:'action',cost:5,text:'+3 Focus · May lose 1 Flux → Draw 1',combo:'+1 Focus',
+    play(S,w,cb){addFoc(S,w,3);mayLoseDraw(S,w,cb)},cx(S,w){addFoc(S,w,1)}},
+  {id:'reinforced_grid',name:'Reinforced Grid',f:'stone',t:'action',cost:3,text:'+1 Focus · +2 Flux',combo:'+1 Focus',
+    play(S,w){addFoc(S,w,1);gainF(S,w,2)},cx(S,w){addFoc(S,w,1)}},
+  {id:'bastion_core',name:'Bastion Core',f:'stone',t:'structure',cost:6,text:'Passive: First Flux loss/turn −1',combo:'+1 Flux',
+    play(S,w){},cx(S,w){gainF(S,w,1)}},
+  {id:'fragment_extractor',name:'Fragment Extractor',f:'neutral',t:'action',cost:3,text:'Scrap from hand or discard · +1 Focus',
+    play(S,w,cb){addFoc(S,w,1);mayScrapHandOrDisc(S,w,cb)}},
+  {id:'unstable_core',name:'Unstable Core',f:'neutral',t:'fragment',cost:6,text:'Passive: +2 Focus/turn · End: −2 Flux · Any faction',
+    play(S,w){},pass(S,w){addFoc(S,w,2)},eot(S,w){loseF(S,w,2)}},
+  {id:'pulse_refinery',name:'Pulse Refinery',f:'neutral',t:'action',cost:4,text:'+2 Focus · May scrap from discard',
+    play(S,w,cb){addFoc(S,w,2);mayScrapDisc(S,w,cb)}},
+  {id:'wild_surge',name:'Wild Surge',f:'neutral',t:'action',cost:5,text:'+2 Disruption · +2 Focus · −1 Flux',
+    play(S,w){addD(S,w,2);addFoc(S,w,2);loseF(S,w,1)}},
+];
+const CARD_MAP=Object.fromEntries(MARKET.map(c=>[c.id,c]));
+
+// Starter cards also need to be in map for hydration
+const STARTER_DEFS=[
+  {id:'basic_shard',name:'Basic Shard',f:'neutral',t:'action',cost:0,text:'+1 Focus',play(S,w){addFoc(S,w,1)}},
+  {id:'pulse_strike',name:'Pulse Strike',f:'neutral',t:'action',cost:0,text:'+1 Disruption',play(S,w){addD(S,w,1)}},
+  {id:'flicker_fragment',name:'Flicker Fragment',f:'neutral',t:'fragment',cost:0,text:'+1 Focus',play(S,w){addFoc(S,w,1)}},
+];
+STARTER_DEFS.forEach(c=>{CARD_MAP[c.id]=c;});
+
+const STARTER=()=>[
+  ...Array(8).fill(0).map(()=>({...CARD_MAP['basic_shard']})),
+  ...Array(2).fill(0).map(()=>({...CARD_MAP['pulse_strike']})),
+  {...CARD_MAP['flicker_fragment']},
+];
+
+// ── MODE ──────────────────────────────────────────────────────────────────────
+let MODE=null;
+let net=null;
+let myId=null,peerId=null;
+let myTurn=false;
+
+function startSP(){
+  MODE='sp';
+  document.getElementById('mode-overlay').style.display='none';
+  initGame();
+}
+function startMP(){
+  MODE='mp';
+  document.getElementById('mode-overlay').style.display='none';
+  document.getElementById('opp-label').textContent='🕹️ Opponent';
+  document.getElementById('ai-hand-ct').style.display='none';
+  initEmptyGame();
+  net=new WSSNet({
+    onReady(id){
+      myId=id;
+    },
+    onPaired(id,peer){
+      myId=id; peerId=peer;
+      const isHost=myId<peerId;
+      log(`🌐 Paired! You are ${isHost?'host':'guest'}. ${isHost?'You go first.':'Opponent goes first.'}`);
+      if(isHost){
+        initHostGame();
+      }else{
+        myTurn=false;
+        setWaiting(true,'Waiting for host to deal…');
+      }
+    },
+    onReconnected(peer){
+      peerId=peer;
+      log('🔄 Reconnected to opponent.');
+      // Try to restore from sessionStorage first
+      restoreOrRequest();
+    },
+    onPeerDisconnected(){
+      log('⚠️ Opponent disconnected. Waiting for them to return…');
+      setWaiting(true,'Opponent disconnected…');
+    },
+    onMessage(data){handleMPMessage(data);}
+  });
+  net.mountPairModal();
+  net.mountServerModal();
+}
+
+// ── GAME STATE ────────────────────────────────────────────────────────────────
+let G, playedSet;
+
+function mkPlayer(){
+  return{flux:45,focus:0,disrupt:0,deck:shuffle(STARTER()),hand:[],discard:[],frags:[],structs:[],factions:new Set(),echoUsed:false,bastionUsed:false,boughtThisTurn:false};
+}
+
+// Empty valid state so UI doesn't crash while waiting for MP init
+function initEmptyGame(){
+  G={player:mkPlayer(),ai:mkPlayer(),market:[],mktDeck:[],turn:1,phase:'wait'};
+  playedSet=new Set();
+  render();
+}
+
+function initGame(){
+  G={player:mkPlayer(),ai:mkPlayer(),market:[],mktDeck:shuffle(MARKET.map(c=>({...c}))),turn:1,phase:'player'};
+  playedSet=new Set();
+  for(let i=0;i<5;i++)refill();
+  draw(G,'player',5);draw(G,'ai',5);
+  applyPassives('player');
+  log('⚗️ New game! Your turn.');
+  render();
+}
+
+function initHostGame(){
+  G={player:mkPlayer(),ai:mkPlayer(),market:[],mktDeck:shuffle(MARKET.map(c=>({...c}))),turn:1,phase:'player'};
+  playedSet=new Set();
+  for(let i=0;i<5;i++)refill();
+  draw(G,'player',5);
+  draw(G,'ai',5);
+  myTurn=true;
+  applyPassives('player');
+  setWaiting(false);
+  log('⚗️ You go first!');
+  render();
+  // Small delay so guest is fully ready before receiving state
+  setTimeout(()=>sendState(true),300);
+}
+
+function refill(){while(G.market.length<5&&G.mktDeck.length>0)G.market.push({...G.mktDeck.pop()});}
+
+// ── RESOURCE FNS ──────────────────────────────────────────────────────────────
+function addFoc(G,w,n){G[w].focus+=n}
+function addD(G,w,n){G[w].disrupt+=n}
+function gainF(G,w,n){G[w].flux=Math.min(45,G[w].flux+n)}
+function loseF(G,w,n){
+  const p=G[w];
+  if(!p.bastionUsed&&p.structs.some(c=>c.id==='bastion_core')){
+    n=Math.max(0,n-1);p.bastionUsed=true;
+    log(`🪨 Bastion Core absorbs 1 damage for ${w==='player'?'you':'opponent'}!`);
+  }
+  p.flux=Math.max(0,p.flux-n);
+  checkDeath();
+}
+function draw(G,w,n){
+  const p=G[w];
+  for(let i=0;i<n;i++){
+    if(!p.deck.length){
+      if(!p.discard.length)return;
+      p.deck=shuffle([...p.discard]);p.discard=[];
+      log(`${w==='player'?'You':'Opponent'} shuffled discard into deck.`);
+    }
+    p.hand.push(p.deck.pop());
+  }
+}
+function applyPassives(w){[...G[w].frags,...G[w].structs].forEach(c=>{if(c.pass)c.pass(G,w);});}
+function applyEOT(w){[...G[w].frags,...G[w].structs].forEach(c=>{if(c.eot)c.eot(G,w);});}
+
+// ── COMBO / ECHO ──────────────────────────────────────────────────────────────
+function execCard(w,card,cb){
+  const p=G[w];
+  const isEcho=card.t==='action'&&!p.echoUsed&&p.frags.some(c=>c.id==='echo_fragment');
+  if(isEcho)p.echoUsed=true;
+  const hasCombo=card.f!=='neutral'&&p.factions.has(card.f)&&card.cx;
+  if(card.f!=='neutral')p.factions.add(card.f);
+  const isComplex=card.text&&(card.text.includes('May')||card.text.includes('Return'));
+  if(isEcho&&!isComplex){
+    log(`✨ Echo! ${card.name} triggers twice.`);
+    card.play(G,w,null);if(hasCombo)card.cx(G,w);
+    card.play(G,w,cb||done);if(hasCombo)card.cx(G,w);
+  }else{
+    card.play(G,w,cb||done);
+    if(hasCombo){card.cx(G,w);log(`🔗 Combo: ${card.name}!`);}
+  }
+  function done(){render();}
+}
+
+// ── MAY EFFECTS ───────────────────────────────────────────────────────────────
+function mayLoseDraw(G,w,cb){
+  if(w==='ai'){loseF(G,w,1);draw(G,w,1);if(cb)cb();return;}
+  modal('Optional','Lose 1 Flux to draw a card?',[],
+    [{l:'Yes',p:true,fn(){loseF(G,'player',1);draw(G,'player',1);closeM(cb);}},
+     {l:'Skip',fn(){closeM(cb);}}]);
+}
+function mayScrapHand4D(G,w,cb){
+  if(w==='ai'){if(G.ai.hand.length){const c=G.ai.hand.reduce((a,b)=>a.cost<=b.cost?a:b);G.ai.hand=G.ai.hand.filter(x=>x!==c);addD(G,'ai',2);}if(cb)cb();return;}
+  const cards=handAvail();
+  if(!cards.length){closeM(cb);return;}
+  modal('Scorch Loop','Scrap from hand → +2 Disruption?',cards,
+    [{l:'Skip',fn(){closeM(cb);}}],
+    c=>{G.player.hand=G.player.hand.filter(x=>x!==c);addD(G,'player',2);closeM(cb);});
+}
+function mayScrapHand(G,w,cb){
+  if(w==='ai'){if(G.ai.hand.length){const c=G.ai.hand.reduce((a,b)=>a.cost<=b.cost?a:b);G.ai.hand=G.ai.hand.filter(x=>x!==c);}if(cb)cb();return;}
+  const cards=handAvail();
+  if(!cards.length){closeM(cb);return;}
+  modal('Flux Drift','Scrap a card from your hand?',cards,
+    [{l:'Skip',fn(){closeM(cb);}}],
+    c=>{G.player.hand=G.player.hand.filter(x=>x!==c);closeM(cb);});
+}
+function mayScrapDisc(G,w,cb){
+  if(w==='ai'){if(G.ai.discard.length)G.ai.discard.pop();if(cb)cb();return;}
+  if(!G.player.discard.length){closeM(cb);return;}
+  modal('Pulse Refinery','Scrap from discard?',G.player.discard,
+    [{l:'Skip',fn(){closeM(cb);}}],
+    c=>{G.player.discard=G.player.discard.filter(x=>x!==c);closeM(cb);});
+}
+function mayScrapHandOrDisc(G,w,cb){
+  if(w==='ai'){
+    if(G.ai.hand.length){const c=G.ai.hand.reduce((a,b)=>a.cost<=b.cost?a:b);G.ai.hand=G.ai.hand.filter(x=>x!==c);}
+    else if(G.ai.discard.length)G.ai.discard.pop();
+    if(cb)cb();return;
+  }
+  const cards=[...handAvail(),...G.player.discard];
+  if(!cards.length){closeM(cb);return;}
+  modal('Fragment Extractor','Scrap from hand or discard?',cards,
+    [{l:'Skip',fn(){closeM(cb);}}],
+    c=>{G.player.hand=G.player.hand.filter(x=>x!==c);G.player.discard=G.player.discard.filter(x=>x!==c);closeM(cb);});
+}
+function pickFromDiscard(G,w,cb){
+  if(w==='ai'){if(G.ai.discard.length){const c=G.ai.discard.reduce((a,b)=>a.cost>=b.cost?a:b);G.ai.discard=G.ai.discard.filter(x=>x!==c);G.ai.hand.push(c);}if(cb)cb();return;}
+  if(!G.player.discard.length){closeM(cb);return;}
+  modal('Temporal Glitch','Return a card from discard to hand.',G.player.discard,[],
+    c=>{G.player.discard=G.player.discard.filter(x=>x!==c);G.player.hand.push(c);closeM(cb);});
+}
+function oppDiscardRnd(G,w){
+  const o=opp(w);
+  if(G[o].hand.length){
+    const i=Math.floor(Math.random()*G[o].hand.length);
+    const c=G[o].hand.splice(i,1)[0];
+    G[o].discard.push(c);
+    log(`💨 Phase Collapse: ${o==='ai'?'Opponent':'You'} discarded ${c.name}.`);
+  }
+}
+function handAvail(){return G.player.hand.filter((_,i)=>!playedSet.has(i));}
+
+// ── MODAL ─────────────────────────────────────────────────────────────────────
+function modal(title,desc,cards,btns,onCard){
+  document.getElementById('m-title').textContent=title;
+  document.getElementById('m-desc').textContent=desc;
+  const mc=document.getElementById('m-cards');mc.innerHTML='';
+  cards.forEach(c=>{const el=mkCard(c);el.classList.add('modal-card-sel');el.onclick=()=>{if(onCard)onCard(c);};mc.appendChild(el);});
+  const mb=document.getElementById('m-btns');mb.innerHTML='';
+  btns.forEach(b=>{const btn=document.createElement('button');btn.className='m-btn'+(b.p?' primary':'');btn.textContent=b.l;btn.onclick=b.fn;mb.appendChild(btn);});
+  document.getElementById('modal-ov').classList.add('show');render();
+}
+function closeM(cb){document.getElementById('modal-ov').classList.remove('show');render();if(cb)cb();}
+
+// ── PLAYER ACTIONS ────────────────────────────────────────────────────────────
+function playerPlay(i){
+  if(!isMyActivePhase())return;
+  if(playedSet.has(i))return;
+  if(G.player.boughtThisTurn){log('❌ Already bought — action phase locked!');return;}
+  const card=G.player.hand[i];if(!card)return;
+  playedSet.add(i);
+  log(`▶ You play ${card.name}.`);
+  if(card.t==='fragment'){G.player.frags.push(card);if(card.pass)card.pass(G,'player');}
+  else if(card.t==='structure'){G.player.structs.push(card);if(card.pass)card.pass(G,'player');}
+  execCard('player',card,()=>render());
+  render();
+}
+function playerBuy(i){
+  if(!isMyActivePhase())return;
+  const card=G.market[i];if(!card)return;
+  if(G.player.focus<card.cost){log('❌ Not enough Focus!');return;}
+  G.player.focus-=card.cost;
+  G.player.discard.push({...card});
+  G.market.splice(i,1);refill();
+  G.player.boughtThisTurn=true;
+  log(`🛒 You bought ${card.name}.`);
+  render();
+}
+function isMyActivePhase(){
+  if(G.phase!=='player')return false;
+  if(MODE==='mp'&&!myTurn)return false;
+  return true;
+}
+
+function endPlayerTurn(){
+  if(!isMyActivePhase())return;
+  if(document.getElementById('modal-ov').classList.contains('show'))return;
+  applyEOT('player');
+  const dmg=G.player.disrupt;
+  if(dmg>0){log(`⚔️ You attack for ${dmg}! Opp: ${G.ai.flux} → ${Math.max(0,G.ai.flux-dmg)}`);loseF(G,'ai',dmg);}
+  else log('⚔️ End turn, 0 Disruption.');
+  if(checkDeath())return;
+
+  G.player.hand.forEach(c=>G.player.discard.push(c));
+  G.player.hand=[];playedSet=new Set();
+  G.player.focus=0;G.player.disrupt=0;G.player.factions=new Set();
+  G.player.echoUsed=false;G.player.bastionUsed=false;G.player.boughtThisTurn=false;
+  draw(G,'player',5);
+  G.turn++;G.phase='ai';
+  document.getElementById('end-btn').disabled=true;
+
+  if(MODE==='sp'){
+    render();setTimeout(doAI,400);
+  }else{
+    myTurn=false;
+    sendState();
+    setWaiting(true,'Waiting for opponent…');
+    render();
+  }
+}
+
+// ── MP SERIALIZATION ──────────────────────────────────────────────────────────
+function serializePlayer(p){
+  return{
+    flux:p.flux,focus:p.focus,disrupt:p.disrupt,
+    deck:p.deck.map(c=>c.id),
+    hand:p.hand.map(c=>c.id),
+    discard:p.discard.map(c=>c.id),
+    frags:p.frags.map(c=>c.id),
+    structs:p.structs.map(c=>c.id),
+    boughtThisTurn:p.boughtThisTurn||false,
+  };
+}
+function hydrateCard(id){
+  const def=CARD_MAP[id];
+  if(!def){console.warn('Unknown card id:',id);return null;}
+  return{...def};
+}
+function hydrateList(ids){return ids.map(hydrateCard).filter(Boolean);}
+function hydratePlayer(p){
+  return{
+    flux:p.flux,focus:p.focus,disrupt:p.disrupt,
+    deck:hydrateList(p.deck),
+    hand:hydrateList(p.hand),
+    discard:hydrateList(p.discard),
+    frags:hydrateList(p.frags),
+    structs:hydrateList(p.structs),
+    factions:new Set(),echoUsed:false,bastionUsed:false,
+    boughtThisTurn:p.boughtThisTurn||false,
+  };
+}
+function sendState(isInitial=false){
+  if(!net)return;
+  const payload={
+    type:'state',
+    turn:G.turn,
+    isInitial,
+    market:G.market.map(c=>c.id),
+    mktDeck:G.mktDeck.map(c=>c.id),
+    player:serializePlayer(G.ai),
+    ai:serializePlayer(G.player),
+  };
+  // Persist our own state (from our perspective) so we can restore on reload
+  sessionStorage.setItem('sf_state', JSON.stringify({
+    turn:G.turn,
+    myTurn,
+    whosTurn: myTurn ? 'me' : 'peer',
+    myId,
+    market:G.market.map(c=>c.id),
+    mktDeck:G.mktDeck.map(c=>c.id),
+    player:serializePlayer(G.player),
+    ai:serializePlayer(G.ai),
+  }));
+  net.send(payload);
+}
+function restoreOrRequest(){
+  const saved=sessionStorage.getItem('sf_state');
+  if(saved){
+    try{
+      const d=JSON.parse(saved);
+      G.turn=d.turn;
+      G.market=hydrateList(d.market);
+      G.mktDeck=hydrateList(d.mktDeck);
+      G.player=hydratePlayer(d.player);
+      G.ai=hydratePlayer(d.ai);
+      playedSet=new Set();
+      // Derive turn ownership: if saved myId matches current myId, trust whosTurn directly
+      // If myId changed (e.g. server restarted), fall back to requesting state
+      if(d.myId && d.myId !== myId){
+        log('⚠️ Session ID changed, requesting fresh state…');
+        net.send({type:'request_state'});
+        return;
+      }
+      myTurn = d.whosTurn === 'me';
+      G.phase = myTurn ? 'player' : 'ai';
+      if(myTurn){
+        applyPassives('player');
+        setWaiting(false);
+        document.getElementById('end-btn').disabled=false;
+        log(`🔄 Restored — Turn ${G.turn}: Your Turn`);
+        sendState(false, true);
+      }else{
+        setWaiting(true,'Waiting for opponent…');
+        log(`🔄 Restored — Turn ${G.turn}: Opponent's Turn`);
+        net.send({type:'request_state'});
+      }
+      render();
+    }catch(e){
+      net.send({type:'request_state'});
+    }
+  }else{
+    if(myTurn) sendState(false);
+    else net.send({type:'request_state'});
+  }
+}
+
+function handleMPMessage(data){
+  if(data.type==='request_state'){
+    // Peer is asking us to resend — only respond if it's our turn (we have authoritative state)
+    if(myTurn) sendState();
+    return;
+  }
+  if(data.type!=='state')return;
+  G.turn=data.turn;
+  G.market=hydrateList(data.market);
+  G.mktDeck=hydrateList(data.mktDeck);
+  G.player=hydratePlayer(data.player);
+  G.ai=hydratePlayer(data.ai);
+  playedSet=new Set();
+
+  // isInitial=true means host just sent opening state — guest waits, host plays first
+  // Otherwise: activeId is the sender, so receiver's turn = activeId !== myId... 
+  // BUT after endTurn sender already flipped phase, so receiver should always play next.
+  // Simplest truth: whoever receives a state message always plays next, EXCEPT on isInitial where guest waits.
+  if(data.isInitial){
+    myTurn = false;
+  } else {
+    myTurn = true;
+  }
+  G.phase = myTurn ? 'player' : 'ai';
+
+  if(myTurn){
+    applyPassives('player');
+    setWaiting(false);
+    document.getElementById('end-btn').disabled=false;
+    log(`── Turn ${G.turn}: Your Turn ──`);
+  }else{
+    setWaiting(true,'Waiting for opponent…');
+    log(`── Turn ${G.turn}: Opponent's Turn ──`);
+  }
+  checkResonance('player');
+  render();
+}
+
+// ── AI TURN (SP only) ─────────────────────────────────────────────────────────
+function doAI(){
+  if(MODE==='mp')return;
+  const ai=G.ai;
+  ai.focus=0;ai.disrupt=0;ai.factions=new Set();ai.echoUsed=false;ai.bastionUsed=false;
+  log('── AI TURN ──');
+  applyPassives('ai');
+  const hand=[...ai.hand];ai.hand=[];
+  hand.forEach(card=>{
+    log(`🤖 AI plays ${card.name}.`);
+    if(card.t==='fragment'){ai.frags.push(card);if(card.pass)card.pass(G,'ai');}
+    else if(card.t==='structure'){ai.structs.push(card);if(card.pass)card.pass(G,'ai');}
+    execCard('ai',card,null);
+  });
+  log(`🤖 Focus: ${ai.focus}, Disruption: ${ai.disrupt}`);
+  let bought=true;
+  while(bought){
+    bought=false;
+    const picks=G.market.filter(c=>c.cost<=ai.focus).sort((a,b)=>{
+      const sc=c=>(c.text.includes('Disruption')?3:0)+(c.text.includes('Flux')?1:0)+c.cost;
+      return sc(b)-sc(a);
+    });
+    if(picks.length){const pick=picks[0];const idx=G.market.indexOf(pick);ai.focus-=pick.cost;ai.discard.push({...pick});G.market.splice(idx,1);refill();log(`🤖 AI buys ${pick.name}.`);bought=true;}
+  }
+  applyEOT('ai');
+  const dmg=ai.disrupt;
+  if(dmg>0){log(`💥 AI attacks for ${dmg}! You: ${G.player.flux} → ${Math.max(0,G.player.flux-dmg)}`);loseF(G,'player',dmg);}
+  else log('🤖 AI ends with 0 Disruption.');
+  if(checkDeath())return;
+  ai.hand.forEach(c=>ai.discard.push(c));ai.hand=[];ai.focus=0;ai.disrupt=0;ai.factions=new Set();
+  draw(G,'ai',5);
+  G.phase='player';
+  document.getElementById('end-btn').disabled=false;
+  checkResonance('player');
+  applyPassives('player');
+  log('── YOUR TURN ──');
+  render();
+}
+
+// ── WIN CONDITIONS ────────────────────────────────────────────────────────────
+function checkDeath(){
+  if(G.ai.flux<=0){endGame('player','collapse');return true;}
+  if(G.player.flux<=0){endGame('ai','collapse');return true;}
+  return false;
+}
+function checkResonance(w){
+  const p=G[w];if(p.flux<10||p.frags.length<8)return;
+  const real=p.frags.filter(c=>c.id!=='unstable_core');
+  const wild=p.frags.some(c=>c.id==='unstable_core');
+  const facs=new Set(real.map(c=>c.f));
+  if(facs.size+(wild?1:0)>=3)endGame(w,'resonance');
+}
+function endGame(winner,type){
+  G.phase='over';
+  const win=winner==='player';
+  document.getElementById('go-title').textContent=win?'🎉 YOU WIN!':'💀 YOU LOSE';
+  document.getElementById('go-sub').textContent=
+    type==='collapse'?(win?'You reduced your opponent\'s Flux to zero!':'Your Flux was reduced to zero.')
+    :(win?'Resonance Victory!':'Opponent achieved Resonance Victory.');
+  document.getElementById('go').classList.add('show');
+}
+
+// ── WAITING STRIP ─────────────────────────────────────────────────────────────
+function setWaiting(show,msg=''){
+  const s=document.getElementById('waiting-strip');
+  s.classList.toggle('show',show);
+  if(msg)document.getElementById('waiting-sub').textContent=msg;
+  document.getElementById('end-btn').disabled=show||!myTurn;
+}
+
+// ── LOG ───────────────────────────────────────────────────────────────────────
+function log(msg){
+  document.getElementById('live-log').textContent=msg;
+  const ll=document.getElementById('log-list');
+  const d=document.createElement('div');d.textContent=msg;ll.appendChild(d);
+  ll.scrollTop=ll.scrollHeight;
+}
+function toggleLog(){document.getElementById('log-drawer').classList.toggle('open');}
+function toggleFS(){const e=document.documentElement;if(!document.fullscreenElement)e.requestFullscreen?.();else document.exitFullscreen?.();}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function mkCard(card){
+  if(!card||!card.name)return document.createElement('div');
+  const d=document.createElement('div');d.className='card';
+  d.innerHTML=`
+    <span class="c-faction ${FC[card.f]||'fc-neutral'}">${FI[card.f]||''} ${(card.f||'').toUpperCase()}</span>
+    <span class="c-name">${card.name}</span>
+    ${(card.cost||0)>0?`<span class="c-cost">${card.cost}</span>`:''}
+    <span class="c-body">${card.text||''}</span>
+    ${card.combo?`<span class="c-combo">⚡ ${card.combo}</span>`:''}
+    <span class="c-tag ${card.t==='fragment'?'tag-fragment':card.t==='structure'?'tag-structure':'tag-action'}">${TI[card.t]||''} ${(card.t||'').toUpperCase()}</span>
+  `;
+  return d;
+}
+function renderHand(){
+  const row=document.getElementById('hand-row');row.innerHTML='';
+  const active=isMyActivePhase();
+  if(!G.player.hand.length){row.innerHTML='<span style="color:var(--dim);font-size:11px;padding:8px">No cards.</span>';return;}
+  G.player.hand.forEach((card,i)=>{
+    if(!card)return;
+    const el=mkCard(card);
+    if(playedSet.has(i)||G.player.boughtThisTurn||!active){
+      el.classList.add('locked');
+    }else{
+      el.classList.add('tappable');
+      if(card.t==='fragment')el.classList.add('fragment-type');
+      if(card.t==='structure')el.classList.add('structure-type');
+      el.onclick=()=>playerPlay(i);
+    }
+    row.appendChild(el);
+  });
+}
+function renderMarket(){
+  const row=document.getElementById('market-row');row.innerHTML='';
+  const active=isMyActivePhase();
+  if(!G.market.length){row.innerHTML='<span style="color:var(--dim);font-size:11px;padding:8px">Market empty.</span>';return;}
+  G.market.forEach((card,i)=>{
+    if(!card)return;
+    const el=mkCard(card);
+    const can=active&&G.player.focus>=card.cost;
+    el.classList.add(can?'buyable':'no-focus');
+    if(can)el.onclick=()=>playerBuy(i);
+    row.appendChild(el);
+  });
+  document.getElementById('mkt-left').textContent=`(${G.mktDeck.length} left)`;
+}
+function renderPersistent(w){
+  const el=document.getElementById(w+'-persistent');el.innerHTML='';
+  const cards=[...G[w].frags,...G[w].structs];
+  if(!cards.length){
+    if(w==='player')el.innerHTML='<span style="color:var(--dim);font-size:10px">No fragments or structures yet.</span>';
+    return;
+  }
+  cards.forEach(card=>{
+    if(!card)return;
+    if(w==='player'){
+      const d=mkCard(card);d.style.borderColor=card.t==='fragment'?'#7c6fff':'#c09050';el.appendChild(d);
+    }else{
+      const d=document.createElement('div');d.className='mini-card';
+      d.innerHTML=`<span class="${FC[card.f]||'fc-neutral'}">${FI[card.f]||''}</span><span>${card.name}</span>`;
+      el.appendChild(d);
+    }
+  });
+}
+function render(){
+  if(!G)return;
+  const pf=G.player.flux,af=G.ai.flux;
+  document.getElementById('p-flux').textContent=pf;
+  document.getElementById('p-flux-fill').style.width=(pf/45*100)+'%';
+  document.getElementById('ai-flux-num').textContent=af;
+  document.getElementById('ai-flux-fill').style.width=(af/45*100)+'%';
+  document.getElementById('p-focus').textContent=G.player.focus;
+  document.getElementById('p-disrupt').textContent=G.player.disrupt;
+  document.getElementById('p-deck-ct').textContent=`🂠 Deck: ${G.player.deck.length}`;
+  document.getElementById('p-disc-ct').textContent=`♻ Discard: ${G.player.discard.length}`;
+  document.getElementById('ai-deck-ct').textContent=`🂠 ${G.ai.deck.length}`;
+  document.getElementById('ai-disc-ct').textContent=`♻ ${G.ai.discard.length}`;
+  if(MODE==='sp')document.getElementById('ai-hand-ct').textContent=`🤚 ${G.ai.hand.length}`;
+  const active=isMyActivePhase();
+  const badge=MODE==='mp'?(myTurn?'Your Turn':'Opponent\'s Turn'):(G.phase==='player'?'Your Turn':'AI Turn');
+  document.getElementById('turn-badge').textContent=`Turn ${G.turn} · ${badge}`;
+  document.getElementById('end-btn').disabled=!active;
+  renderHand();renderMarket();
+  renderPersistent('player');renderPersistent('ai');
+}
+</script>
+</body>
+</html>
