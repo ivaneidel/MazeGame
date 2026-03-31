@@ -7,11 +7,7 @@
 <script src="https://ivaneidel.github.io/html-games/net/wssnet.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{
-  height:100%;background:#0b5d2a;
-  font-family:'Segoe UI',monospace;color:white;overflow:hidden;
-  user-select:none;-webkit-user-select:none;
-}
+html,body{height:100%;background:#0b5d2a;font-family:'Segoe UI',monospace;color:white;overflow:hidden;user-select:none;-webkit-user-select:none;}
 #game{display:none;flex-direction:column;height:100vh;}
 #idBar{display:flex;justify-content:space-between;align-items:center;padding:4px 10px;background:#00000055;font-size:11px;color:#ffffffaa;}
 #idBar .id-val{color:white;font-weight:bold;letter-spacing:2px;}
@@ -68,12 +64,12 @@ html,body{
 
 <script>
 // ── CONSTANTS ──
-const SS_KEY = 'generala_save';
-const RETRY_MS = 5000;
+const SS_KEY   = 'generala_save';
+const RETRY_MS  = 5000;
 const RETRY_MAX = 12; // 60s cap
 
 // ── RUNTIME ──
-let myId = null, peer = null, isHost = false;
+let myId = null, peer = null;
 let state = null;
 let seq = 0;
 let lastAppliedSeq = -1;
@@ -85,8 +81,7 @@ let retryCt = 0;
 function saveAll() {
   if (!state || !myId || !peer) return;
   sessionStorage.setItem(SS_KEY, JSON.stringify({
-    myId, peer, isHost,
-    seq, lastAppliedSeq,
+    myId, peer, seq, lastAppliedSeq,
     pendingMsg: pendingMsg || null,
     state
   }));
@@ -96,13 +91,12 @@ function loadAll() {
   try {
     const d = JSON.parse(sessionStorage.getItem(SS_KEY));
     if (!d) return false;
-    myId      = d.myId;
-    peer      = d.peer;
-    isHost    = d.isHost;
-    seq       = d.seq || 0;
+    myId           = d.myId;
+    peer           = d.peer;
+    seq            = d.seq || 0;
     lastAppliedSeq = d.lastAppliedSeq ?? -1;
-    pendingMsg = d.pendingMsg || null;
-    state     = d.state;
+    pendingMsg     = d.pendingMsg || null;
+    state          = d.state;
     return true;
   } catch(e) { return false; }
 }
@@ -145,16 +139,14 @@ const net = new WSSNet({
 
   onPaired(id, peerId) {
     myId = id; peer = peerId;
-    isHost = myId < peer;
     document.getElementById('idBarMe').innerText = myId;
     document.getElementById('idBarOpp').innerText = peer;
-    if (isHost) {
-      // Host initialises state and sends seq=0
-      state = initialState(peer); // guest goes first
+    // Lower ID initialises the game — guest (higher ID) goes first
+    if (myId < peer) {
+      state = initialState(peer);
       state.scores[myId] = emptyScore();
-      state.scores[peer]  = emptyScore();
-      seq = 0;
-      lastAppliedSeq = -1;
+      state.scores[peer] = emptyScore();
+      seq = 0; lastAppliedSeq = -1;
       const msg = buildMsg();
       saveAll();
       net.send(msg);
@@ -176,34 +168,25 @@ const net = new WSSNet({
     if (data.type === 'state') {
       // Always ACK immediately
       net.send({type:'ack', seq:data.seq});
-
       // Ignore duplicates
       if (data.seq <= lastAppliedSeq) return;
       lastAppliedSeq = data.seq;
-
       state = data.state;
       if (!peer) peer = Object.keys(state.scores).find(id => id !== myId);
       saveAll();
-
       if (document.getElementById('game').style.display !== 'flex') startGame();
       else render();
-      return;
     }
-
-    // Guest-to-host action messages
-    if (data.type === 'action' && isHost) handle(data);
   },
 
   onReconnected(peerId) {
     peer = peerId;
     showReconnectBanner(false);
-    // Load from storage — no resync needed
     if (loadAll()) {
       document.getElementById('idBarMe').innerText = myId;
       document.getElementById('idBarOpp').innerText = peer;
       if (document.getElementById('game').style.display !== 'flex') startGame();
       else render();
-      // If we had an unACKed message, resend it
       if (pendingMsg) { retryCt = 0; net.send(pendingMsg); }
     }
   },
@@ -216,67 +199,17 @@ const net = new WSSNet({
 net.mountServerModal();
 net.mountPairModal();
 
-// ── BUILD STATE MESSAGE ──
-function buildMsg() {
-  return { type:'state', seq, state };
-}
+// ── HELPERS ──
+function buildMsg() { return { type:'state', seq, state }; }
+function isMyTurn() { return state && state.turn === myId; }
 
-// ── RECONNECT BANNER ──
 function showReconnectBanner(show, msg = '⚡ Reconnecting…') {
   const b = document.getElementById('reconnectBanner');
   b.style.display = show ? 'block' : 'none';
   b.textContent = msg;
 }
 
-// ── ACTIONS ──
-function isMyTurn() { return state && state.turn === myId; }
-
-function dispatch(obj) {
-  if (isHost) handle(obj);
-  else net.send({type:'action', ...obj});
-}
-
-function roll() {
-  if (!isMyTurn() || state.roll >= 3) return;
-  dispatch({action:'roll'});
-}
-
-function toggle(i) {
-  if (!isMyTurn() || state.roll === 0) return;
-  // Optimistic local update for guest
-  if (!isHost) { state.held[i] = !state.held[i]; saveAll(); render(); }
-  dispatch({action:'toggle', i});
-}
-
-function choose(cat) {
-  if (!isMyTurn() || state.scores[myId][cat] !== null) return;
-  dispatch({action:'score', cat});
-}
-
-// ── HOST LOGIC ──
-function handle(a) {
-  if (a.action === 'roll') {
-    if (state.roll >= 3) return;
-    for (let i = 0; i < 5; i++)
-      if (!state.held[i]) state.dice[i] = 1 + (Math.random() * 6 | 0);
-    state.roll++;
-    sendState(true);
-  }
-  if (a.action === 'toggle') {
-    if (state.roll === 0) return;
-    state.held[a.i] = !state.held[a.i];
-    sendState();
-  }
-  if (a.action === 'score') {
-    state.scores[state.turn][a.cat] = computeScore(a.cat, state);
-    if (gameOver()) { endGame(); return; }
-    state.roll = 0;
-    state.held = [false,false,false,false,false];
-    state.turn = state.turn === myId ? peer : myId;
-    sendState();
-  }
-}
-
+// Send state — called by the active player after every action
 function sendState(anim = false) {
   seq++;
   const msg = buildMsg();
@@ -284,6 +217,31 @@ function sendState(anim = false) {
   net.send(msg);
   startRetry(msg);
   render(anim);
+}
+
+// ── ACTIONS — turn owner acts locally, then broadcasts ──
+function roll() {
+  if (!isMyTurn() || state.roll >= 3) return;
+  for (let i = 0; i < 5; i++)
+    if (!state.held[i]) state.dice[i] = 1 + (Math.random() * 6 | 0);
+  state.roll++;
+  sendState(true);
+}
+
+function toggle(i) {
+  if (!isMyTurn() || state.roll === 0) return;
+  state.held[i] = !state.held[i];
+  sendState();
+}
+
+function choose(cat) {
+  if (!isMyTurn() || state.scores[myId][cat] !== null) return;
+  state.scores[state.turn][cat] = computeScore(cat, state);
+  if (gameOver()) { endGame(); return; }
+  state.roll = 0;
+  state.held = [false,false,false,false,false];
+  state.turn = state.turn === myId ? peer : myId;
+  sendState();
 }
 
 // ── SCORING ──
@@ -300,14 +258,14 @@ function computeScore(cat, st) {
   if(cat==='fives')    return diceSum(d,5);
   if(cat==='sixes')    return diceSum(d,6);
   if(cat==='escalera') return isStraight(d) ? (r?25:20) : 0;
-  if(cat==='full'){
+  if(cat==='full') {
     const set=new Set(d);
     if(set.size===2 && [...set].some(x=>diceCount(d,x)===3)) return r?35:30;
     return 0;
   }
   if(cat==='poker')    return d.some(v=>diceCount(d,v)>=4) ? (r?45:40) : 0;
   if(cat==='generala') return new Set(d).size===1 ? (r?60:50) : 0;
-  if(cat==='doble'){
+  if(cat==='doble') {
     if(new Set(d).size===1 && st.scores[st.turn].generala!==null) return 100;
     return 0;
   }
@@ -348,23 +306,19 @@ const CAT_LABELS = {
   generala:'Generala (50/60)', doble:'Double Generala (100)'
 };
 const PIP_MAP = {
-  1:[[50,50]],
-  2:[[22,22],[78,78]],
-  3:[[22,22],[50,50],[78,78]],
-  4:[[22,22],[78,22],[22,78],[78,78]],
-  5:[[22,22],[78,22],[50,50],[22,78],[78,78]],
+  1:[[50,50]], 2:[[22,22],[78,78]], 3:[[22,22],[50,50],[78,78]],
+  4:[[22,22],[78,22],[22,78],[78,78]], 5:[[22,22],[78,22],[50,50],[22,78],[78,78]],
   6:[[22,22],[78,22],[22,50],[78,50],[22,78],[78,78]]
 };
 
 function buildDie(val, held, anim) {
   const wrap = document.createElement('div');
-  wrap.className = 'die-wrap' + (held?' held':'') + (anim?' rollAnim':'');
+  wrap.className = 'die-wrap'+(held?' held':'')+(anim?' rollAnim':'');
   const inner = document.createElement('div'); inner.className = 'die-inner';
   const face  = document.createElement('div'); face.className  = 'die-face';
   PIP_MAP[val].forEach(([px,py]) => {
     const p = document.createElement('div'); p.className = 'pip';
-    p.style.left = (px/100*58-4.5)+'px';
-    p.style.top  = (py/100*58-4.5)+'px';
+    p.style.left = (px/100*58-4.5)+'px'; p.style.top = (py/100*58-4.5)+'px';
     face.appendChild(p);
   });
   inner.appendChild(face); wrap.appendChild(inner);
@@ -374,15 +328,12 @@ function buildDie(val, held, anim) {
 function render(anim = false) {
   if (!state || !peer) return;
 
-  // Winner
   const winnerEl = document.getElementById('winner');
   if (state.over) {
-    const t1 = state.over.scores[myId] ?? 0;
-    const t2 = state.over.scores[peer]  ?? 0;
-    const msg = t1>t2 ? '🏆 YOU WIN!' : t1<t2 ? '😔 YOU LOSE' : '🤝 DRAW';
+    const t1 = state.over.scores[myId]??0, t2 = state.over.scores[peer]??0;
+    const msg = t1>t2?'🏆 YOU WIN!':t1<t2?'😔 YOU LOSE':'🤝 DRAW';
     winnerEl.innerHTML = `<div>${msg}</div><div style="font-size:20px">${t1} – ${t2}</div>`;
-    winnerEl.style.display = 'flex';
-    return;
+    winnerEl.style.display = 'flex'; return;
   }
   winnerEl.style.display = 'none';
 
@@ -390,12 +341,12 @@ function render(anim = false) {
   const turnsLeft = Object.values(state.scores[state.turn]).filter(v=>v===null).length;
 
   const banner = document.getElementById('turnBanner');
-  banner.textContent = (myTurn ? '⬤ YOUR TURN' : '⬤ OPPONENT\'S TURN') + `  ·  ${turnsLeft} left`;
+  banner.textContent = (myTurn?'⬤ YOUR TURN':'⬤ OPPONENT\'S TURN')+`  ·  ${turnsLeft} left`;
   banner.className = myTurn ? 'mine' : 'theirs';
 
   const diceArea = document.getElementById('diceArea');
   diceArea.innerHTML = '';
-  state.dice.forEach((v, i) => {
+  state.dice.forEach((v,i) => {
     const d = buildDie(v, state.held[i], anim && !state.held[i]);
     if (myTurn && rolled) d.onclick = () => toggle(i);
     diceArea.appendChild(d);
@@ -405,39 +356,33 @@ function render(anim = false) {
   rollBtn.disabled = !myTurn || state.roll >= 3;
   rollBtn.textContent = `🎲 Roll (${state.roll}/3)`;
   document.getElementById('rollInfo').textContent = rolled
-    ? (myTurn ? 'Tap dice to hold/unhold' : 'Waiting for opponent…')
-    : (myTurn ? 'Roll the dice to start your turn' : 'Waiting for opponent…');
+    ? (myTurn?'Tap dice to hold/unhold':'Waiting for opponent…')
+    : (myTurn?'Roll the dice to start your turn':'Waiting for opponent…');
 
   const sb = document.getElementById('scoreboard');
   sb.innerHTML = '';
   [myId, peer].forEach(pid => {
     const col = document.createElement('div');
-    col.className = 'score-col' + (state.turn===pid ? ' active-player' : '');
+    col.className = 'score-col'+(state.turn===pid?' active-player':'');
     const h = document.createElement('h3');
-    h.textContent = (pid===myId?'You':'Opponent') + ' · ' + total(pid) + ' pts';
+    h.textContent = (pid===myId?'You':'Opponent')+' · '+total(pid)+' pts';
     col.appendChild(h);
     Object.keys(emptyScore()).forEach(cat => {
-      const row    = document.createElement('div'); row.className = 'score-row';
+      const row = document.createElement('div'); row.className = 'score-row';
       const stored = state.scores[pid][cat];
-      const lbl    = document.createElement('span'); lbl.className = 'label'; lbl.textContent = CAT_LABELS[cat];
-      const valEl  = document.createElement('span'); valEl.className = 'val';
+      const lbl = document.createElement('span'); lbl.className='label'; lbl.textContent=CAT_LABELS[cat];
+      const valEl = document.createElement('span'); valEl.className='val';
       if (stored !== null) {
         valEl.textContent = stored; row.classList.add('locked');
-      } else if (pid === myId && myTurn && rolled) {
-        const valid    = canScore(cat, state);
-        const mustBurn = state.roll === 3;
+      } else if (pid===myId && myTurn && rolled) {
+        const valid = canScore(cat, state), mustBurn = state.roll===3;
         if (valid) {
-          valEl.textContent = '+' + computeScore(cat, state);
-          row.classList.add('clickable','preview-val');
-          row.onclick = () => choose(cat);
+          valEl.textContent = '+'+computeScore(cat,state);
+          row.classList.add('clickable','preview-val'); row.onclick = ()=>choose(cat);
         } else if (mustBurn) {
-          valEl.textContent = 'burn 0';
-          row.classList.add('clickable');
-          row.style.opacity = '0.5';
-          row.onclick = () => choose(cat);
-        } else {
-          valEl.textContent = '–'; row.classList.add('invalid');
-        }
+          valEl.textContent = 'burn 0'; row.classList.add('clickable');
+          row.style.opacity = '0.5'; row.onclick = ()=>choose(cat);
+        } else { valEl.textContent = '–'; row.classList.add('invalid'); }
       }
       row.appendChild(lbl); row.appendChild(valEl); col.appendChild(row);
     });
@@ -445,11 +390,10 @@ function render(anim = false) {
   });
 }
 
-// ── START ──
 function startGame() {
   document.getElementById('game').style.display = 'flex';
-  document.getElementById('idBarMe').innerText  = myId || '—';
-  document.getElementById('idBarOpp').innerText = peer || '—';
+  document.getElementById('idBarMe').innerText  = myId||'—';
+  document.getElementById('idBarOpp').innerText = peer||'—';
   render();
 }
 </script>
