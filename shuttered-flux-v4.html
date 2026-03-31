@@ -151,9 +151,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;fo
 <div id="panel-main">
   <div class="section-label">🛒 Market <span style="font-weight:normal;color:var(--dim)" id="mkt-left"></span></div>
   <div class="cards-row" id="market-row"></div>
-  <div class="section-label" style="margin-top:6px">▶ Your Hand</div>
+  <div class="section-label" style="margin-top:6px">▶ Your Hand <span id="hand-count" style="font-weight:normal;color:var(--dim)"></span></div>
   <div class="cards-row" id="hand-row"></div>
-  <div class="section-label" style="margin-top:6px">🔷 In Play</div>
+  <div class="section-label" style="margin-top:6px">🔷 In Play <span id="frag-count" style="font-weight:normal;color:var(--dim)"></span></div>
   <div class="cards-row" id="player-persistent"></div>
   <div style="margin-top:4px;display:flex;gap:8px;font-size:10px;color:var(--dim)">
     <span id="p-deck-ct">🂠 Deck: 6</span>
@@ -766,7 +766,16 @@ function log(msg){
   ll.scrollTop=ll.scrollHeight;
 }
 function toggleLog(){document.getElementById('log-drawer').classList.toggle('open');}
-function toggleFS(){const e=document.documentElement;if(!document.fullscreenElement)e.requestFullscreen?.();else document.exitFullscreen?.();}
+function toggleFS(){
+  const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)&&!window.MSStream;
+  if(isIOS){
+    alert('Tap the Share button → "Add to Home Screen" for fullscreen on iOS.');
+    return;
+  }
+  const e=document.documentElement;
+  if(!document.fullscreenElement)e.requestFullscreen?.();
+  else document.exitFullscreen?.();
+}
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
 function mkCard(card){
@@ -846,6 +855,11 @@ function render(){
   const badge=MODE==='mp'?(myTurn?'Your Turn':'Opponent\'s Turn'):(G.phase==='player'?'Your Turn':'AI Turn');
   document.getElementById('turn-badge').textContent=`Turn ${G.turn} · ${badge}`;
   document.getElementById('end-btn').disabled=!isMyActivePhase();
+  const played=playedSet.size;
+  const total=G.player.hand.length;
+  document.getElementById('hand-count').textContent=total?`(${played}/${total} played)`:'';
+  const frags=G.player.frags.length;
+  document.getElementById('frag-count').textContent=frags?`(${frags} fragment${frags!==1?'s':''})`:'';
   renderHand();renderMarket();
   renderPersistent('player');renderPersistent('ai');
 }
